@@ -1,5 +1,9 @@
 # Hype Machine — Planning
 
+> **Superseded:** the full implementation plan now lives in
+> [`docs/product-plan.md`](docs/product-plan.md). This file is kept as the
+> original scoping/questions record.
+
 ## What this is
 
 A monorepo system for creating one or more **branded, disclosed AI personas**
