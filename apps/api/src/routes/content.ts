@@ -1,12 +1,20 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import {
   approvalActionSchema,
+  CONTENT_STATUSES,
   generationRequestSchema,
 } from "@hype/core";
 import { getPrisma } from "@hype/db";
 import { notFound } from "../lib/errors.js";
 import { applyApprovalAction } from "../services/approvals.js";
 import { generateContent } from "../services/generation.js";
+
+const contentListQuerySchema = z.object({
+  status: z.enum(CONTENT_STATUSES).optional(),
+  campaignId: z.string().optional(),
+  personaId: z.string().optional(),
+});
 
 export async function contentRoutes(app: FastifyInstance): Promise<void> {
   const prisma = getPrisma();
@@ -19,14 +27,10 @@ export async function contentRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.get("/content", async (request) => {
-    const query = request.query as {
-      status?: string;
-      campaignId?: string;
-      personaId?: string;
-    };
+    const query = contentListQuerySchema.parse(request.query);
     return prisma.generatedContent.findMany({
       where: {
-        status: query.status ? (query.status as never) : undefined,
+        status: query.status,
         campaignId: query.campaignId,
         personaId: query.personaId,
       },
@@ -68,6 +72,7 @@ export async function contentRoutes(app: FastifyInstance): Promise<void> {
     return prisma.generatedContent.findMany({
       where: { status: "PENDING_APPROVAL" },
       orderBy: { createdAt: "asc" },
+      take: 100,
       include: {
         persona: { select: { id: true, name: true } },
         campaign: { select: { id: true, name: true } },

@@ -1,6 +1,6 @@
 // End-to-end pipeline smoke test using a stubbed LLM provider.
-// Requires a running database with the seed applied:
-//   DATABASE_URL=... pnpm exec tsx src/dev/smoke.ts
+// Requires a running database with the seed applied. Run: pnpm smoke
+import "../lib/env.js";
 import { getPrisma } from "@hype/db";
 import { generateContent, setLlmProvider } from "../services/generation.js";
 import { applyApprovalAction } from "../services/approvals.js";

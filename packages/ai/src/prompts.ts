@@ -18,6 +18,8 @@ export interface PersonaContext {
 
 export interface CampaignContext {
   name: string;
+  /** Tone intensity from the campaign's guardrail config (SOFT..AGGRESSIVE_BUT_SAFE). */
+  aggressionLevel?: string;
   campaignType: string;
   objective: string;
   targetAudience: string;
@@ -99,6 +101,9 @@ export function buildCampaignBlock(campaign: CampaignContext): string {
     campaign.productUrl ? `URL: ${campaign.productUrl}` : ``,
     `Directness level: ${campaign.directnessLevel}`,
     `Plug frequency: ${campaign.plugFrequency}${campaign.plugPercentage != null ? ` (${campaign.plugPercentage}%)` : ""}`,
+    campaign.aggressionLevel
+      ? `Tone intensity: ${campaign.aggressionLevel} (SOFT = gentle, AGGRESSIVE_BUT_SAFE = bold and provocative but never unsafe or dishonest)`
+      : ``,
     ``,
     `Allowed claims (only these product claims may be made):`,
     campaign.allowedClaims.map((c) => `- ${c}`).join("\n") || "- (none defined)",

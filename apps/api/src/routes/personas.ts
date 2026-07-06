@@ -23,18 +23,16 @@ export async function personaRoutes(app: FastifyInstance): Promise<void> {
 
   app.post("/personas", async (request, reply) => {
     const input = personaCreateSchema.parse(request.body);
-    const owner = await prisma.user.findFirst({ where: { role: "OWNER" } });
+    const owner = await prisma.user.upsert({
+      where: { email: "owner@local" },
+      update: {},
+      create: { name: "Owner", email: "owner@local", role: "OWNER" },
+    });
     const persona = await prisma.persona.create({
       data: {
         ...input,
         slug: input.slug ?? uniqueSlug(input.name),
-        ownerId:
-          owner?.id ??
-          (
-            await prisma.user.create({
-              data: { name: "Owner", email: "owner@local", role: "OWNER" },
-            })
-          ).id,
+        ownerId: owner.id,
       },
     });
     reply.code(201);
@@ -76,6 +74,7 @@ export async function personaRoutes(app: FastifyInstance): Promise<void> {
     return prisma.personaMemory.findMany({
       where: { personaId: id },
       orderBy: [{ importance: "desc" }, { createdAt: "desc" }],
+      take: 200,
     });
   });
 

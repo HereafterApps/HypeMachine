@@ -12,7 +12,18 @@ const REGENERATE_INSTRUCTIONS: Record<string, string> = {
   CHANGE_HOOK: "Keep the substance but write a completely different hook.",
   CHANGE_CTA: "Keep the substance but change the CTA approach.",
   CHANGE_VISUAL_STYLE: "Keep the message but propose a different visual style.",
+  CHANGE_PLATFORM:
+    "Adapt this content for the new target platform, following its conventions.",
 };
+
+// Statuses a reviewer is allowed to act on. Acting on APPROVED/SCHEDULED/
+// PUBLISHED/ARCHIVED content would corrupt the lifecycle (e.g. rewriting a
+// post that is already live).
+const REVIEWABLE_STATUSES = new Set([
+  "DRAFT_GENERATED",
+  "PENDING_APPROVAL",
+  "NEEDS_EDIT",
+]);
 
 /**
  * Approval workflow (plan §11). Approving marks content APPROVED (or
@@ -29,51 +40,46 @@ export async function applyApprovalAction(
     where: { id: contentId },
   });
   if (!content) throw notFound("Generated content");
+  if (!REVIEWABLE_STATUSES.has(content.status)) {
+    throw badRequest(`Cannot apply ${input.action} to content in status ${content.status}`);
+  }
 
   if (input.action === "APPROVE") {
-    if (
-      content.status !== "PENDING_APPROVAL" &&
-      content.status !== "NEEDS_EDIT" &&
-      content.status !== "DRAFT_GENERATED"
-    ) {
-      throw badRequest(`Cannot approve content in status ${content.status}`);
-    }
     const scheduledFor = input.edits?.scheduledFor ?? content.scheduledFor;
-    const updated = await prisma.generatedContent.update({
-      where: { id: contentId },
+    // Guard the transition on the previously-read status so a concurrent
+    // action on the same row loses instead of silently double-applying.
+    const { count } = await prisma.generatedContent.updateMany({
+      where: { id: contentId, status: content.status },
+      data: { status: scheduledFor ? "SCHEDULED" : "APPROVED", scheduledFor },
+    });
+    if (count === 0) {
+      throw badRequest("Content was modified concurrently; reload and retry");
+    }
+    await prisma.approval.updateMany({
+      where: { generatedContentId: contentId, status: "PENDING" },
       data: {
-        status: scheduledFor ? "SCHEDULED" : "APPROVED",
-        scheduledFor,
-        approvals: {
-          updateMany: {
-            where: { status: "PENDING" },
-            data: {
-              status: "APPROVED",
-              approvedByUserId: userId,
-              approvedAt: new Date(),
-            },
-          },
-        },
+        status: "APPROVED",
+        approvedByUserId: userId,
+        approvedAt: new Date(),
       },
     });
-    return updated;
+    return prisma.generatedContent.findUniqueOrThrow({ where: { id: contentId } });
   }
 
   if (input.action === "REJECT") {
-    const updated = await prisma.generatedContent.update({
-      where: { id: contentId },
+    const { count } = await prisma.generatedContent.updateMany({
+      where: { id: contentId, status: content.status },
+      data: { status: "REJECTED" },
+    });
+    if (count === 0) {
+      throw badRequest("Content was modified concurrently; reload and retry");
+    }
+    await prisma.approval.updateMany({
+      where: { generatedContentId: contentId, status: "PENDING" },
       data: {
         status: "REJECTED",
-        approvals: {
-          updateMany: {
-            where: { status: "PENDING" },
-            data: {
-              status: "REJECTED",
-              rejectionReason: input.reason ?? null,
-              rejectedAt: new Date(),
-            },
-          },
-        },
+        rejectionReason: input.reason ?? null,
+        rejectedAt: new Date(),
       },
     });
     // Rejections become persona memory so future generations learn (§11.3).
@@ -89,13 +95,13 @@ export async function applyApprovalAction(
         },
       });
     }
-    return updated;
+    return prisma.generatedContent.findUniqueOrThrow({ where: { id: contentId } });
   }
 
   if (input.action === "EDIT") {
     if (!input.edits) throw badRequest("EDIT action requires an edits object");
     const { scheduledFor, ...textEdits } = input.edits;
-    const updated = await prisma.generatedContent.update({
+    return prisma.generatedContent.update({
       where: { id: contentId },
       data: {
         ...textEdits,
@@ -106,15 +112,35 @@ export async function applyApprovalAction(
             where: { status: "PENDING" },
             data: { status: "EDITED", editInstruction: input.editInstruction ?? null },
           },
+          // Fresh PENDING approval so the edited version still gets an
+          // explicit human sign-off recorded before it can be approved.
+          create: { status: "PENDING", requestedVia: "edit" },
         },
       },
     });
-    return updated;
   }
 
   // All remaining actions are regeneration variants.
   const baseInstruction = REGENERATE_INSTRUCTIONS[input.action];
   if (!baseInstruction) throw badRequest(`Unsupported action ${input.action}`);
+
+  const instruction = [
+    baseInstruction,
+    input.editInstruction ?? "",
+    `Previous version for reference (do not repeat it):`,
+    content.bodyText || content.script || content.caption,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  // Generate the replacement FIRST; only archive the original once the
+  // replacement exists. An LLM failure must never destroy the only draft.
+  const replacement = await generateContent({
+    campaignId: content.campaignId,
+    contentType: content.contentType,
+    platform: input.platform ?? content.platform,
+    instruction,
+  });
 
   await prisma.generatedContent.update({
     where: { id: contentId },
@@ -129,19 +155,5 @@ export async function applyApprovalAction(
     },
   });
 
-  const instruction = [
-    baseInstruction,
-    input.editInstruction ?? "",
-    `Previous version for reference (do not repeat it):`,
-    content.bodyText || content.script || content.caption,
-  ]
-    .filter(Boolean)
-    .join("\n");
-
-  return generateContent({
-    campaignId: content.campaignId,
-    contentType: content.contentType,
-    platform: content.platform,
-    instruction,
-  });
+  return replacement;
 }

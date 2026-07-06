@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { apiGet } from "@/lib/api";
 
 interface Persona {
@@ -26,11 +27,16 @@ export default async function PersonasPage() {
 
   return (
     <>
-      <h1>Personas</h1>
+      <div className="page-head">
+        <h1>Personas</h1>
+        <Link className="btn primary" href="/personas/new">
+          + New persona
+        </Link>
+      </div>
       {personas.length === 0 ? (
         <div className="empty">
-          No personas yet. Seed the starter template with{" "}
-          <code>pnpm --filter @hype/api exec tsx src/seed.ts</code>.
+          No personas yet. Create one, or seed the starter template with{" "}
+          <code>pnpm seed</code>.
         </div>
       ) : (
         <table>

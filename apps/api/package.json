@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
+    "seed": "tsx src/seed.ts",
+    "smoke": "tsx src/dev/smoke.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
@@ -15,6 +17,7 @@
     "@hype/core": "workspace:*",
     "@hype/db": "workspace:*",
     "@hype/guardrails": "workspace:*",
+    "dotenv": "^17.4.2",
     "fastify": "^5.2.0",
     "zod": "^4.1.0"
   },

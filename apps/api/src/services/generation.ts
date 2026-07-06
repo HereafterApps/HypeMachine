@@ -1,4 +1,5 @@
 import {
+  generatedReplySchema,
   generatedShortVideoSchema,
   generatedTextPostSchema,
   guardrailConfigSchema,
@@ -7,6 +8,7 @@ import {
 import { getPrisma, type GeneratedContent } from "@hype/db";
 import {
   AnthropicProvider,
+  buildReplyPrompt,
   buildShortVideoPrompt,
   buildSystemPrompt,
   buildTextPostPrompt,
@@ -16,6 +18,7 @@ import {
 } from "@hype/ai";
 import { runGuardrails } from "@hype/guardrails";
 import { badRequest, notFound } from "../lib/errors.js";
+import { notifyPendingApproval } from "./notify.js";
 
 let provider: LlmProvider | undefined;
 
@@ -73,23 +76,15 @@ async function loadContexts(campaignId: string): Promise<{
       : [],
   };
 
+  // The Zod schema owns every default; unknown row fields (id, timestamps)
+  // are stripped by parse.
   const guardrailConfig = guardrailConfigSchema.parse({
-    allowedTopics: campaign.guardrailConfig?.allowedTopics ?? [],
-    bannedTopics: campaign.guardrailConfig?.bannedTopics ?? [],
-    allowedClaims: campaign.guardrailConfig?.allowedClaims ?? [],
-    bannedClaims: campaign.guardrailConfig?.bannedClaims ?? [],
-    requiredDisclosures: campaign.guardrailConfig?.requiredDisclosures ?? [],
-    competitorRules: campaign.guardrailConfig?.competitorRules ?? undefined,
-    aggressionLevel: campaign.guardrailConfig?.aggressionLevel ?? "NORMAL",
-    sensitiveTopicRules: campaign.guardrailConfig?.sensitiveTopicRules ?? [],
-    escalationRules: campaign.guardrailConfig?.escalationRules ?? [],
-    platformSpecificRules:
-      (campaign.guardrailConfig?.platformSpecificRules as Record<string, string[]>) ?? {},
-    wordsToAvoid: campaign.guardrailConfig?.wordsToAvoid ?? [],
+    ...(campaign.guardrailConfig ?? {}),
   });
 
   const campaignContext: CampaignContext = {
     name: campaign.name,
+    aggressionLevel: guardrailConfig.aggressionLevel,
     campaignType: campaign.campaignType,
     objective: campaign.objective,
     targetAudience: campaign.targetAudience,
@@ -202,6 +197,46 @@ export async function generateContent(
       riskNotes: post.riskNotes,
       campaignPlugType: post.campaignPlugType,
     };
+  } else if (
+    request.contentType === "REPLY" ||
+    request.contentType === "DM_REPLY"
+  ) {
+    if (!request.originalComment) {
+      throw badRequest("REPLY generation requires originalComment");
+    }
+    userPrompt = buildReplyPrompt(
+      campaign,
+      platformContext,
+      request.originalComment,
+      request.instruction,
+    );
+    const reply = await llm.generateStructured({
+      systemPrompt,
+      userPrompt,
+      schema: generatedReplySchema,
+    });
+    fields = {
+      title: "",
+      hook: "",
+      script: "",
+      caption: "",
+      bodyText: reply.reply,
+      hashtags: [],
+      cta: "",
+      generationMetadata: {
+        tone: reply.tone,
+        shouldMentionCampaign: reply.shouldMentionCampaign,
+        campaignMention: reply.campaignMention,
+        escalateToHuman: reply.escalateToHuman,
+        escalationReason: reply.reason,
+        originalComment: request.originalComment,
+      },
+      guardrailText: reply.reply,
+      riskNotes: reply.escalateToHuman
+        ? [`ESCALATE TO HUMAN: ${reply.reason}`, `Model risk level: ${reply.riskLevel}`]
+        : [`Model risk level: ${reply.riskLevel}`],
+      campaignPlugType: reply.shouldMentionCampaign ? "CASUAL" : "NONE",
+    };
   } else {
     throw badRequest(
       `Content type ${request.contentType} is not supported by the generation endpoint yet`,
@@ -250,10 +285,13 @@ export async function generateContent(
       data: {
         generatedContentId: content.id,
         status: "PENDING",
-        storyboardJson: fields.generationMetadata["brollPlan"] ?? undefined,
+        storyboardJson: (fields.generationMetadata["brollPlan"] as object) ?? undefined,
       },
     });
   }
+
+  // Fire-and-forget: a notification failure never blocks the pipeline.
+  void notifyPendingApproval(content, persona.name, campaign.name);
 
   return content;
 }

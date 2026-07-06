@@ -10,8 +10,8 @@ export interface GuardrailSubject {
   platform?: string;
 }
 
-function containsPhrase(haystack: string, phrase: string): boolean {
-  return haystack.toLowerCase().includes(phrase.toLowerCase().trim());
+function containsPhrase(lowerHaystack: string, phrase: string): boolean {
+  return lowerHaystack.includes(phrase.toLowerCase().trim());
 }
 
 /**
@@ -26,7 +26,8 @@ export function runGuardrails(
   const warnings: string[] = [];
   const blockers: string[] = [];
   const requiredEdits: string[] = [];
-  const text = subject.text;
+  // Lowercase once — every check below scans this same string.
+  const text = subject.text.toLowerCase();
 
   for (const claim of config.bannedClaims) {
     if (claim && containsPhrase(text, claim)) {
@@ -60,12 +61,8 @@ export function runGuardrails(
     }
   }
 
-  const competitorRules = config.competitorRules as {
-    allowCompetitorMentions?: boolean;
-    competitorNames?: string[];
-  };
-  if (!competitorRules.allowCompetitorMentions) {
-    for (const name of competitorRules.competitorNames ?? []) {
+  if (!config.competitorRules.allowCompetitorMentions) {
+    for (const name of config.competitorRules.competitorNames) {
       if (containsPhrase(text, name)) {
         blockers.push(`Mentions competitor "${name}" (mentions disabled)`);
       }

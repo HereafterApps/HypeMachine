@@ -8,11 +8,14 @@
   },
   "packageManager": "pnpm@9.15.9",
   "scripts": {
+    "setup": "pnpm install && pnpm db:generate && pnpm build",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "dev:api": "pnpm --filter @hype/api dev",
     "dev:web": "pnpm --filter @hype/web dev",
     "db:generate": "pnpm --filter @hype/db generate",
-    "db:migrate": "pnpm --filter @hype/db migrate"
+    "db:migrate": "pnpm --filter @hype/db migrate",
+    "seed": "pnpm --filter @hype/api seed",
+    "smoke": "pnpm --filter @hype/api smoke"
   }
 }

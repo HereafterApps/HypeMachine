@@ -27,16 +27,27 @@ packages/
 ## Getting started
 
 ```bash
-pnpm install
-cp .env.example .env          # fill in ANTHROPIC_API_KEY etc.
+cp .env.example .env          # set API_TOKEN and ANTHROPIC_API_KEY
 docker compose up -d          # postgres + redis
-pnpm db:generate
-pnpm db:migrate
+pnpm setup                    # install + prisma generate + build all packages
+pnpm db:migrate               # create the schema
+pnpm seed                     # optional: Professor Steve + GuidedGenius starter
 pnpm dev:api                  # http://localhost:4000
-pnpm dev:web                  # http://localhost:3000
+pnpm dev:web                  # http://localhost:3000 (second terminal)
 ```
 
-All API routes (except `/health`) require `Authorization: Bearer $API_TOKEN`.
+Every process loads the repo-root `.env` automatically. All API routes
+(except `/health`) require `Authorization: Bearer $API_TOKEN`; the API
+refuses to start without a token unless `DISABLE_AUTH=true` is set (local
+dev only).
+
+`pnpm smoke` runs an end-to-end pipeline test (generation → guardrails →
+approve/reject/regenerate) against the database using a stubbed LLM — no
+Anthropic key needed.
+
+Note: `pnpm dev:api` resolves workspace packages from their `dist/` builds —
+if you edit `packages/*`, run `pnpm build` (or `pnpm --filter <pkg> build`)
+to pick up the change.
 
 ## Status
 

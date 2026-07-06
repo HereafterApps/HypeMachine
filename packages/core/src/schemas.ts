@@ -111,8 +111,11 @@ export const guardrailConfigSchema = z.object({
   bannedClaims: z.array(z.string().max(1000)).default([]),
   requiredDisclosures: z.array(z.string().max(1000)).default([]),
   competitorRules: z
-    .object({ allowCompetitorMentions: z.boolean().default(false) })
-    .default({ allowCompetitorMentions: false }),
+    .object({
+      allowCompetitorMentions: z.boolean().default(false),
+      competitorNames: z.array(z.string().max(200)).default([]),
+    })
+    .default({ allowCompetitorMentions: false, competitorNames: [] }),
   aggressionLevel: z.enum(AGGRESSION_LEVELS).default("NORMAL"),
   sensitiveTopicRules: z.array(z.string().max(1000)).default([]),
   escalationRules: z.array(z.string().max(1000)).default([]),
@@ -126,6 +129,8 @@ export const generationRequestSchema = z.object({
   contentType: z.enum(CONTENT_TYPES).default("TEXT_POST"),
   platform: z.enum(PLATFORMS).default("X"),
   instruction: z.string().max(5000).optional(),
+  /** The comment being replied to — required for REPLY / DM_REPLY. */
+  originalComment: z.string().max(10000).optional(),
 });
 export type GenerationRequest = z.infer<typeof generationRequestSchema>;
 
@@ -133,6 +138,8 @@ export const approvalActionSchema = z.object({
   action: z.enum(APPROVAL_ACTIONS),
   reason: z.string().max(5000).optional(),
   editInstruction: z.string().max(5000).optional(),
+  /** Target platform for CHANGE_PLATFORM regenerations. */
+  platform: z.enum(PLATFORMS).optional(),
   edits: z
     .object({
       title: z.string().max(300).optional(),

@@ -1,5 +1,6 @@
 // Seeds the starter persona + campaign templates (plan §13, §14).
-// Run with: pnpm --filter @hype/api exec tsx src/seed.ts
+// Run with: pnpm seed (from the repo root)
+import "./lib/env.js";
 import { getPrisma } from "@hype/db";
 
 const prisma = getPrisma();

@@ -1,5 +1,8 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-const API_TOKEN = process.env.API_TOKEN ?? process.env.NEXT_PUBLIC_API_TOKEN;
+// Server-only: these fetchers run in server components / server actions.
+// The token must NEVER be exposed via a NEXT_PUBLIC_ variable — those are
+// inlined into the client bundle.
+const API_TOKEN = process.env.API_TOKEN;
 
 export async function apiGet<T>(path: string): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
