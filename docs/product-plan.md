@@ -219,6 +219,22 @@ added later without changing core architecture.
 
 Use a monorepo.
 
+### 3.1 Concrete v1 decisions (settled at review)
+
+| Area | Decision | Rationale |
+|---|---|---|
+| Package manager / workspace | **pnpm workspaces** | Fast, strict, first-class monorepo support |
+| Language | **TypeScript everywhere** (strict mode), Node ≥ 20 | One language across web/api/packages |
+| Backend framework | **Fastify** | Lighter than NestJS; schema validation via Zod fits the prompt system |
+| Queue | **Redis + BullMQ** | Self-hostable, simple local dev via docker-compose; SQS can be swapped in later behind the jobs module |
+| Database | **PostgreSQL 16 + Prisma** | Per §5. Embeddings stored as `Json` in v1; pgvector migration when memory search ships |
+| LLM provider (first implementation) | **Anthropic Claude** via `@anthropic-ai/sdk`, model `claude-opus-4-8`, structured outputs (`output_config.format` + Zod) | Behind the `LlmProvider` interface (§16.1) — vendor stays swappable |
+| Avatar / voice / render providers | **Interfaces + manual-export stubs only in v1** (HeyGen, ElevenLabs, Shotstack slots reserved) | Real integrations are Phase 4 |
+| Storage | **S3-compatible adapter with local-disk fallback for dev** | No cloud dependency to run locally |
+| Auth (v1) | **Single-user: static API token via env var** | Multi-user roles deferred per §5.1 |
+| Notifications | **Discord webhook first, SES email second** | Webhook needs no infra approval |
+| Publishing (v1) | **ManualExportProvider first**, then YouTube + X | Per §2 MVP platforms |
+
 ### Frontend
 
 - Next.js
@@ -232,11 +248,11 @@ Use a monorepo.
 
 - Node.js
 - TypeScript
-- Fastify or NestJS
+- Fastify
 - Prisma ORM
 - PostgreSQL
-- pgvector for memory/search
-- Redis + BullMQ for queues (or AWS SQS/EventBridge if using AWS-native queues)
+- pgvector for memory/search (v1 stores embeddings as JSON; pgvector when memory search ships)
+- Redis + BullMQ for queues
 
 ### Storage
 
