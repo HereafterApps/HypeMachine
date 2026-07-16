@@ -1,0 +1,32 @@
+# Campaign guardrails template (product-plan §20). Loaded into
+# GuardrailConfig; the guardrails engine enforces these before approval.
+allowedTopics:
+  - education
+  - learning
+  - edtech
+  - student motivation
+  - AI tutoring
+bannedTopics:
+  - medical claims
+  - guaranteed academic outcomes
+  - personal attacks
+allowedClaims:
+  - GuidedGenius helps make learning interactive.
+  - GuidedGenius can help explain concepts.
+bannedClaims:
+  - Guaranteed marks improvement.
+  - Replaces all teachers.
+  - Works for every child.
+requiredDisclosures:
+  - Use platform-native AI/synthetic media labels where available.
+competitorRules:
+  allowCompetitorMentions: false
+  names: []
+aggressionLevel: NORMAL
+escalationRules:
+  - If user asks legal/medical/sensitive question, escalate to human.
+# Hard rules that are NOT configurable (see §0.1):
+# - personas are disclosed as AI/virtual, always
+# - own-channel engagement only; no posing as independent users elsewhere
+# - no undisclosed identity fleets; no cold/bulk WhatsApp outreach
+# - every outgoing item requires human approval

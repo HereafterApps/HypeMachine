@@ -1,0 +1,528 @@
+// Hype Machine data model — product-plan.md §5.
+// Embeddings are stored as Json in v1; pgvector migration when memory
+// search ships (§3.1).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Enums (mirrored in @hype/core) ----------
+
+enum UserRole {
+  OWNER
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+enum EntityStatus {
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum PersonaType {
+  VIRTUAL_INFLUENCER
+  BRAND_MASCOT
+  CARTOON
+  PUPPET
+  EXPERT
+  PROFESSOR
+  FOUNDER_AVATAR
+  FACELESS_CHANNEL
+  SATIRICAL_CHARACTER
+  CUSTOM
+}
+
+enum MemoryType {
+  BACKSTORY
+  OPINION
+  HABIT
+  RECURRING_JOKE
+  PAST_POST
+  AUDIENCE_REACTION
+  CAMPAIGN_LEARNING
+  VISUAL_DETAIL
+  BANNED_BEHAVIOR
+  SUCCESSFUL_HOOK
+  FAILED_HOOK
+}
+
+enum AssetType {
+  FACE_REFERENCE
+  AVATAR_LOOK
+  VOICE_SAMPLE
+  ROOM_BACKGROUND
+  OUTFIT
+  INTRO
+  OUTRO
+  MUSIC
+  CAPTION_STYLE
+  LOGO
+  BROLL
+  SCREEN_RECORDING
+  THUMBNAIL_STYLE
+}
+
+enum CampaignType {
+  APP_PROMOTION
+  BRAND_AWARENESS
+  PRODUCT_LAUNCH
+  TREND_PROMOTION
+  MEDIA_LITERACY
+  EXPLAINER
+  COMMUNITY_BUILDING
+  CUSTOM
+}
+
+enum DirectnessLevel {
+  VERY_SUBTLE
+  SUBTLE
+  CASUAL
+  DIRECT
+  HARD_CTA
+}
+
+enum PlugFrequency {
+  EVERY_POST
+  MOST_POSTS
+  HALF_POSTS
+  WHEN_NATURAL
+  OCCASIONAL
+  RARE
+  CUSTOM_PERCENTAGE
+}
+
+enum SourceType {
+  PRODUCT_DOC
+  BRAND_GUIDELINES
+  WEBSITE_COPY
+  APP_SCREENSHOT
+  APP_VIDEO
+  USER_NOTE
+  COMPETITOR
+  CLAIM_BANK
+  FAQ
+  CUSTOM
+}
+
+enum AggressionLevel {
+  SOFT
+  NORMAL
+  SPICY
+  CONTRARIAN
+  AGGRESSIVE_BUT_SAFE
+}
+
+enum Platform {
+  YOUTUBE
+  TIKTOK
+  INSTAGRAM
+  FACEBOOK
+  X
+  THREADS
+  LINKEDIN
+  WHATSAPP
+  DISCORD
+  MANUAL_EXPORT
+}
+
+enum ContentType {
+  SHORT_VIDEO
+  TEXT_POST
+  THREAD
+  IMAGE_CAROUSEL
+  REPLY
+  DM_REPLY
+  WHATSAPP_MESSAGE
+}
+
+enum ContentStatus {
+  DRAFT_GENERATED
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  NEEDS_EDIT
+  SCHEDULED
+  PUBLISHING
+  PUBLISHED
+  FAILED
+  ARCHIVED
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  NEEDS_EDIT
+}
+
+enum CadenceType {
+  CRON
+  INTERVAL
+}
+
+enum PlatformAuthStatus {
+  CONNECTED
+  DISCONNECTED
+  EXPIRED
+  MANUAL
+}
+
+enum VideoAssetStatus {
+  PENDING
+  STORYBOARD
+  VOICE
+  AVATAR
+  BROLL
+  RENDERING
+  COMPLETE
+  FAILED
+}
+
+enum PublishedPostStatus {
+  LIVE
+  DELETED
+  FAILED
+}
+
+// ---------- Models ----------
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  role      UserRole @default(OWNER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  personas  Persona[]
+  approvals Approval[]
+}
+
+model Persona {
+  id                  String       @id @default(cuid())
+  ownerId             String
+  name                String
+  slug                String       @unique
+  status              EntityStatus @default(ACTIVE)
+  personaType         PersonaType  @default(CUSTOM)
+  description         String       @default("")
+  backstory           String       @default("")
+  worldview           String       @default("")
+  speakingStyle       String       @default("")
+  tone                String       @default("")
+  humorStyle          String       @default("")
+  disclosureText      String       @default("Virtual AI-driven character.")
+  defaultLanguage     String       @default("en")
+  defaultPlatformTone Json?
+  memoryEnabled       Boolean      @default(true)
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  owner            User              @relation(fields: [ownerId], references: [id])
+  memories         PersonaMemory[]
+  assets           PersonaAsset[]
+  campaigns        Campaign[]
+  platformAccounts PlatformAccount[]
+  generatedContent GeneratedContent[]
+  insights         LearningInsight[]
+
+  @@index([ownerId, status])
+}
+
+model PersonaMemory {
+  id         String     @id @default(cuid())
+  personaId  String
+  type       MemoryType
+  title      String
+  content    String
+  importance Float      @default(0.5)
+  source     String?
+  embedding  Json?
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  persona Persona @relation(fields: [personaId], references: [id], onDelete: Cascade)
+
+  @@index([personaId, type])
+}
+
+model PersonaAsset {
+  id        String    @id @default(cuid())
+  personaId String
+  type      AssetType
+  name      String
+  url       String
+  s3Key     String?
+  metadata  Json?
+  isDefault Boolean   @default(false)
+  createdAt DateTime  @default(now())
+
+  persona Persona @relation(fields: [personaId], references: [id], onDelete: Cascade)
+
+  @@index([personaId, type])
+}
+
+model Campaign {
+  id                 String          @id @default(cuid())
+  personaId          String
+  name               String
+  slug               String
+  status             EntityStatus    @default(ACTIVE)
+  campaignType       CampaignType    @default(CUSTOM)
+  objective          String          @default("")
+  targetAudience     String?
+  productName        String?
+  productDescription String?
+  productUrl         String?
+  directnessLevel    DirectnessLevel @default(CASUAL)
+  plugFrequency      PlugFrequency   @default(WHEN_NATURAL)
+  plugPercentage     Int?
+  mainMessage        String?
+  productLine        String?
+  primaryKpi         String?
+  secondaryKpis      String[]        @default([])
+  startDate          DateTime?
+  endDate            DateTime?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  persona          Persona            @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  sources          CampaignSource[]
+  guardrailConfig  GuardrailConfig?
+  schedules        ContentSchedule[]
+  generatedContent GeneratedContent[]
+  insights         LearningInsight[]
+
+  @@unique([personaId, slug])
+  @@index([status])
+}
+
+model CampaignSource {
+  id         String     @id @default(cuid())
+  campaignId String
+  type       SourceType
+  title      String
+  content    String?
+  url        String?
+  fileUrl    String?
+  embedding  Json?
+  createdAt  DateTime   @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId, type])
+}
+
+model GuardrailConfig {
+  id                    String          @id @default(cuid())
+  campaignId            String          @unique
+  allowedTopics         String[]        @default([])
+  bannedTopics          String[]        @default([])
+  allowedClaims         String[]        @default([])
+  bannedClaims          String[]        @default([])
+  requiredDisclosures   String[]        @default([])
+  wordsToAvoid          String[]        @default([])
+  competitorRules       Json?
+  aggressionLevel       AggressionLevel @default(NORMAL)
+  sensitiveTopicRules   Json?
+  escalationRules       Json?
+  platformSpecificRules Json?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+}
+
+model PlatformAccount {
+  id                    String             @id @default(cuid())
+  personaId             String
+  platform              Platform
+  handle                String
+  displayName           String?
+  profileUrl            String?
+  authStatus            PlatformAuthStatus @default(MANUAL)
+  accessTokenEncrypted  String?
+  refreshTokenEncrypted String?
+  tokenExpiresAt        DateTime?
+  metadata              Json?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  persona Persona @relation(fields: [personaId], references: [id], onDelete: Cascade)
+
+  @@unique([personaId, platform, handle])
+}
+
+model ContentSchedule {
+  id              String      @id @default(cuid())
+  campaignId      String
+  platform        Platform
+  contentType     ContentType
+  cadenceType     CadenceType @default(INTERVAL)
+  intervalMinutes Int?
+  cronExpression  String?
+  timezone        String      @default("UTC")
+  isActive        Boolean     @default(true)
+  maxDailyCount   Int?
+  quietHoursStart Int?
+  quietHoursEnd   Int?
+  nextRunAt       DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([isActive, nextRunAt])
+}
+
+model GeneratedContent {
+  id                 String        @id @default(cuid())
+  personaId          String
+  campaignId         String
+  platform           Platform
+  contentType        ContentType
+  status             ContentStatus @default(DRAFT_GENERATED)
+  title              String?
+  hook               String?
+  script             String?
+  caption            String?
+  bodyText           String?
+  hashtags           String[]      @default([])
+  cta                String?
+  generationPrompt   String?
+  generationMetadata Json?
+  riskScore          Int?
+  guardrailResult    Json?
+  scheduledFor       DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  persona        Persona         @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  campaign       Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  videoAsset     VideoAsset?
+  approvals      Approval[]
+  publishedPosts PublishedPost[]
+
+  @@index([status, scheduledFor])
+  @@index([campaignId, status])
+  @@index([personaId, createdAt])
+}
+
+model VideoAsset {
+  id                 String           @id @default(cuid())
+  generatedContentId String           @unique
+  status             VideoAssetStatus @default(PENDING)
+  storyboardJson     Json?
+  voiceUrl           String?
+  avatarVideoUrl     String?
+  brollUrls          String[]         @default([])
+  finalVideoUrl      String?
+  thumbnailUrl       String?
+  subtitlesUrl       String?
+  provider           String?
+  providerJobId      String?
+  error              String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  generatedContent GeneratedContent @relation(fields: [generatedContentId], references: [id], onDelete: Cascade)
+}
+
+model Approval {
+  id                 String         @id @default(cuid())
+  generatedContentId String
+  status             ApprovalStatus @default(PENDING)
+  requestedVia       String?
+  approvedByUserId   String?
+  action             String?
+  rejectionReason    String?
+  editInstruction    String?
+  approvedAt         DateTime?
+  rejectedAt         DateTime?
+  createdAt          DateTime       @default(now())
+
+  generatedContent GeneratedContent @relation(fields: [generatedContentId], references: [id], onDelete: Cascade)
+  approvedByUser   User?            @relation(fields: [approvedByUserId], references: [id])
+
+  @@index([generatedContentId, status])
+}
+
+model PublishedPost {
+  id                 String              @id @default(cuid())
+  generatedContentId String
+  platform           Platform
+  platformPostId     String
+  platformUrl        String?
+  publishedAt        DateTime            @default(now())
+  status             PublishedPostStatus @default(LIVE)
+  rawResponse        Json?
+  createdAt          DateTime            @default(now())
+
+  generatedContent GeneratedContent    @relation(fields: [generatedContentId], references: [id], onDelete: Cascade)
+  snapshots        AnalyticsSnapshot[]
+
+  @@index([platform, publishedAt])
+}
+
+model AnalyticsSnapshot {
+  id              String   @id @default(cuid())
+  publishedPostId String
+  views           Int      @default(0)
+  likes           Int      @default(0)
+  comments        Int      @default(0)
+  shares          Int      @default(0)
+  saves           Int      @default(0)
+  clicks          Int      @default(0)
+  engagementRate  Float    @default(0)
+  sentimentScore  Float?
+  rawMetrics      Json?
+  capturedAt      DateTime @default(now())
+
+  publishedPost PublishedPost @relation(fields: [publishedPostId], references: [id], onDelete: Cascade)
+
+  @@index([publishedPostId, capturedAt])
+}
+
+model LearningInsight {
+  id                   String       @id @default(cuid())
+  personaId            String
+  campaignId           String?
+  platform             Platform?
+  contentType          ContentType?
+  insight              String
+  evidence             String
+  confidence           Float
+  actionRecommendation String
+  createdAt            DateTime     @default(now())
+
+  persona  Persona   @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  @@index([personaId, createdAt])
+}
+
+// Observability (§24) + cost tracking (§25)
+model JobLog {
+  id         String   @id @default(cuid())
+  jobName    String
+  jobId      String?
+  personaId  String?
+  campaignId String?
+  contentId  String?
+  provider   String?
+  status     String
+  durationMs Int?
+  costUsd    Float?
+  error      String?
+  createdAt  DateTime @default(now())
+
+  @@index([jobName, createdAt])
+  @@index([status, createdAt])
+}

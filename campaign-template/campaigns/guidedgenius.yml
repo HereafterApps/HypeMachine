@@ -1,0 +1,37 @@
+# Starter campaign template (product-plan §14, §20).
+name: GuidedGenius
+type: APP_PROMOTION
+status: ACTIVE
+objective: Build awareness and engagement for GuidedGenius.
+targetAudience: parents, students, teachers, edtech users
+productName: GuidedGenius
+productUrl: https://guidedgenius.com
+directnessLevel: CASUAL
+plugFrequency:
+  mode: CUSTOM_PERCENTAGE
+  percentage: 60
+primaryKpi: VIEWS
+secondaryKpis:
+  - ENGAGEMENT
+  - CLICKS
+message:
+  main: Learning should be interactive, adaptive, and less boring.
+  productLine: "I've been using this app called GuidedGenius, and damn, it's awesome. I'm not even the target audience."
+content:
+  shortVideo:
+    enabled: true
+    cadence: daily
+    defaultLengthSeconds: 35
+  textPost:
+    enabled: true
+    cadence: twice_daily
+platforms:
+  youtube:
+    enabled: true
+    contentTypes: [SHORT_VIDEO]
+  x:
+    enabled: true
+    contentTypes: [TEXT_POST]
+  tiktok:
+    enabled: false
+    mode: MANUAL_EXPORT

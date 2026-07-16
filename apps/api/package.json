@@ -1,0 +1,33 @@
+{
+  "name": "@hype/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --exclude '**/e2e.test.ts'",
+    "test:integration": "vitest run test/e2e.test.ts"
+  },
+  "dependencies": {
+    "@hype/ai": "workspace:*",
+    "@hype/core": "workspace:*",
+    "@hype/db": "workspace:*",
+    "@hype/guardrails": "workspace:*",
+    "@hype/notifications": "workspace:*",
+    "@hype/publishing": "workspace:*",
+    "@hype/storage": "workspace:*",
+    "bullmq": "^5.34.0",
+    "cron-parser": "^4.9.0",
+    "dotenv": "^16.4.0",
+    "fastify": "^5.2.0",
+    "ioredis": "^5.4.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

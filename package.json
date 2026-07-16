@@ -1,0 +1,36 @@
+{
+  "name": "hype-machine",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Infrastructure for creating and operating disclosed AI personas that run configurable campaigns across multiple platforms.",
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "test:integration": "pnpm --filter @hype/api test:integration",
+    "db:generate": "pnpm --filter @hype/db db:generate",
+    "db:migrate": "pnpm --filter @hype/db db:migrate",
+    "db:seed": "pnpm --filter @hype/db db:seed",
+    "dev:api": "pnpm --filter @hype/api dev",
+    "dev:infra": "bash scripts/dev-infra.sh start",
+    "dev:infra:stop": "bash scripts/dev-infra.sh stop"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "esbuild",
+      "msgpackr-extract",
+      "prisma"
+    ]
+  }
+}
