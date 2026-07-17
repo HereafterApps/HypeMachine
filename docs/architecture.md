@@ -69,13 +69,33 @@ and typed slots for later phases:
 | Storage | Local disk | S3 |
 | Notifications | Console, Discord webhook | SES email (lazy dep) |
 
-## Ethics invariants (§0.1) — enforced in code, not just docs
+## Guardrails (build-spec §2) — enforced in code, not just docs
 
-- Disclosure text is mandatory on personas and injected into every system
-  prompt ("never pretend to be a real human").
-- No forum-style content type exists; replies are generated only for the
-  persona's own posts/DMs.
-- Human approval is a hard status gate: `PENDING_APPROVAL → APPROVED`
-  transitions happen only through the approval endpoints.
-- WhatsApp is a reply/broadcast content type behind the same approval gate;
-  there is no bulk-outreach surface.
+1. **Disclosure** — mandatory on personas, injected into every system prompt
+   ("never pretend to be a real human").
+2. **Mandatory human approval** — a hard status gate: `PENDING_APPROVAL →
+   APPROVED` transitions happen only through the approval endpoints; no
+   auto-publish path exists.
+3. **Own-channel only** — no forum-style content type exists; replies are
+   generated only for the persona's own posts/DMs.
+4. **No sockpuppet coordination** — campaign creation and generation both
+   reject an ACTIVE campaign on the same subject under a *different*
+   persona (409 with explanation).
+5. **WhatsApp opted-in only** — reply/broadcast content type behind the same
+   approval gate; no bulk-outreach surface.
+6. **Political content policy** — for DEBUNK / CIVIC_MECHANICS /
+   MEDIA_LITERACY campaigns the guardrail engine blocks advocacy phrasing
+   (test A floor: vote-for/against, elect/defeat, support-the-candidate…),
+   DEBUNK content is unapprovable without ≥1 primary-source citation, and
+   every political item carries a standing reviewer warning to apply tests
+   A & B ("targets a claim, not a person; correction is verifiable").
+   Type-specific rules are also injected into the generation prompt.
+7. **Learning-loop constraint** — mission campaign types are locked to
+   CLARITY/COMPLETION optimization targets (REACH/ENGAGEMENT rejected with
+   409); the insight-generation prompt explicitly forbids recommending
+   engagement maximization for them, and snapshots carry a `missionMetric`.
+
+**§7.1 conservative default:** DEBUNK campaigns cannot have automated
+schedules and every generation requires a human-supplied `claimToDebunk` —
+i.e. option (a), human picks every topic — until the open decision on topic
+selection is resolved.

@@ -35,7 +35,15 @@ Postgres + Redis):
   memory and shape the next generation
 - **Observability** — every job logged with duration and LLM cost
 
-See [`docs/product-plan.md`](docs/product-plan.md) for the full plan,
+- **Build-spec guardrails (§2)** — political-content policy for
+  DEBUNK/CIVIC_MECHANICS (advocacy blocked, primary-source citation
+  required, reviewer tests A & B surfaced), cross-persona coordination
+  block, mission campaigns locked out of engagement optimization,
+  human-picked debunk topics only (§7.1 conservative default)
+
+See [`docs/build-spec.md`](docs/build-spec.md) for the authoritative
+product spec, [`docs/product-plan.md`](docs/product-plan.md) for the
+detailed reference plan,
 [`docs/architecture.md`](docs/architecture.md) for how this implementation
 maps to it, and [`docs/setup.md`](docs/setup.md) to get running in ~2 minutes.
 
@@ -56,11 +64,14 @@ pnpm test              # unit tests
 pnpm test:integration  # full demo scenario (§26) against live infra
 ```
 
-## Scope & ethics baseline (non-negotiable, see plan §0.1)
+## Scope & ethics baseline (non-negotiable, see build-spec §2)
 
 - Personas are **disclosed** as AI/virtual — a channel, not a disguise.
 - **Own-channel engagement only** — no posing as independent users in other
-  people's threads, no sockpuppets.
+  people's threads, no sockpuppets, no cross-persona coordinated messaging.
 - **Human approval is mandatory** for every outgoing item.
+- **Political content:** civic mechanics and specific-claim debunks only —
+  never advocacy, never candidate/party/election persuasion. Debunks target
+  claims, not people, and require a citable primary source.
 - WhatsApp is opted-in broadcast/replies only; cold outreach is a permanent
   non-goal.

@@ -55,6 +55,7 @@ describe('content schemas', () => {
       campaignPlugType: 'CASUAL',
       whyThisShouldWork: 'Contrast of old professor + new tech.',
       riskNotes: [],
+      sourceCitations: [],
     };
     expect(ShortVideoPlanSchema.parse(plan)).toMatchObject({ title: plan.title });
   });

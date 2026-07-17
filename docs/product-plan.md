@@ -1,5 +1,12 @@
 # Hype Machine — Master Implementation Plan
 
+> **Partially superseded:** the newer [`build-spec.md`](build-spec.md)
+> (Raahil handoff) wins where the two disagree — campaign types, the
+> political-content policy (§2.6 there), the learning-loop optimization
+> constraint (§2.7), the no-sockpuppet-coordination rule (§2.4), and the
+> stack recommendation (flagged open). This file remains the detailed
+> reference for data-model fields, prompts, jobs, and provider interfaces.
+
 ## 0. Product Definition
 
 Build **Hype Machine**, an AI Influence Factory.

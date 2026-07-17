@@ -18,6 +18,7 @@ export function contentRoutes(ctx: AppContext) {
           extraInstructions: z.string().optional(),
           scheduledFor: z.coerce.date().optional(),
           replyingTo: z.string().optional(),
+          claimToDebunk: z.string().min(1).optional(),
         })
         .parse(request.body);
       const result = await generation.generate({ campaignId, ...body });

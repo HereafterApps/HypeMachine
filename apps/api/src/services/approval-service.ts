@@ -112,6 +112,7 @@ export class ApprovalService {
       bodyText?: string;
       hashtags?: string[];
       cta?: string;
+      sourceCitations?: string[];
       scheduledFor?: Date | null;
       editInstruction?: string;
     },
@@ -145,6 +146,7 @@ export class ApprovalService {
       bodyText: merged.bodyText,
       cta: merged.cta,
       hashtags: merged.hashtags ?? content.hashtags,
+      sourceCitations: merged.sourceCitations ?? content.sourceCitations,
     });
 
     const updated = await this.ctx.prisma.generatedContent.update({

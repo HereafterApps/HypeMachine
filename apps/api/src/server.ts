@@ -36,7 +36,7 @@ export async function buildServer(ctx: AppContext): Promise<FastifyInstance> {
     const message = error instanceof Error ? error.message : 'Internal error';
     // Domain-rule violations from services read as 409s, not 500s.
     const conflict =
-      /cannot be approved|only PENDING_APPROVAL|cannot reject|cannot edit|is (PAUSED|ARCHIVED)|guardrail blockers/i.test(
+      /cannot be approved|only PENDING_APPROVAL|cannot reject|cannot edit|is (PAUSED|ARCHIVED)|guardrail blockers|Coordination guardrail|requires claimToDebunk|cannot optimize for/i.test(
         message,
       );
     app.log.error(error);

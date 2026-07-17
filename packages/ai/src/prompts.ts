@@ -20,7 +20,9 @@ export interface PersonaPromptInput {
 
 export interface CampaignPromptInput {
   name: string;
+  campaignType: string;
   objective: string;
+  subject?: string | null;
   productName?: string | null;
   productDescription?: string | null;
   productUrl?: string | null;
@@ -74,6 +76,28 @@ export function buildPersonaContext(persona: PersonaPromptInput): string {
     .join('\n');
 }
 
+/** Type-specific rules (build-spec §2.6) injected into every generation. */
+const CAMPAIGN_TYPE_RULES: Record<string, string> = {
+  DEBUNK: [
+    'DEBUNK rules (non-negotiable):',
+    '- Address ONE specific claim. End at "is this specific claim accurate?".',
+    '- NEVER conclude with support/oppose/vote/which-side-is-right — that is advocacy and is blocked.',
+    '- Target the claim, never a person\'s character or a party.',
+    '- Cite at least one primary source in sourceCitations (URL or precise reference).',
+    '- The correction must be verifiable: someone who dislikes the conclusion should still agree the correction itself is factually accurate.',
+  ].join('\n'),
+  CIVIC_MECHANICS: [
+    'CIVIC_MECHANICS rules (non-negotiable):',
+    '- Explain how a civic process works (e.g. how ranked-choice voting counts ballots).',
+    '- Strictly neutral: no advocacy for any candidate, party, side, or outcome.',
+    '- Prefer citing official/primary sources in sourceCitations.',
+  ].join('\n'),
+  MEDIA_LITERACY: [
+    'MEDIA_LITERACY rules:',
+    '- Teach evaluation skills; never tell the audience what to believe about a contested political question.',
+  ].join('\n'),
+};
+
 export function buildCampaignContext(campaign: CampaignPromptInput): string {
   const plug =
     campaign.plugFrequency === 'CUSTOM_PERCENTAGE'
@@ -86,7 +110,10 @@ export function buildCampaignContext(campaign: CampaignPromptInput): string {
   return [
     `# Campaign`,
     `Name: ${campaign.name}`,
+    `Type: ${campaign.campaignType}`,
     `Goal: ${campaign.objective}`,
+    campaign.subject ? `Subject: ${campaign.subject}` : '',
+    CAMPAIGN_TYPE_RULES[campaign.campaignType] ?? '',
     campaign.productName ? `Product: ${campaign.productName} — ${campaign.productDescription ?? ''}` : '',
     campaign.productUrl ? `URL: ${campaign.productUrl}` : '',
     campaign.targetAudience ? `Target audience: ${campaign.targetAudience}` : '',

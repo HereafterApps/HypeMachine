@@ -31,6 +31,8 @@ export const ShortVideoPlanSchema = z.object({
   campaignPlugType: z.enum(CAMPAIGN_PLUG_TYPES),
   whyThisShouldWork: z.string(),
   riskNotes: z.array(z.string()),
+  /** Primary sources. Required non-empty for DEBUNK campaigns (build-spec §2.6). */
+  sourceCitations: z.array(z.string()),
 });
 export type ShortVideoPlan = z.infer<typeof ShortVideoPlanSchema>;
 
@@ -42,6 +44,8 @@ export const TextPostPlanSchema = z.object({
   campaignPlugType: z.enum(CAMPAIGN_PLUG_TYPES),
   whyThisShouldWork: z.string(),
   riskNotes: z.array(z.string()),
+  /** Primary sources. Required non-empty for DEBUNK campaigns (build-spec §2.6). */
+  sourceCitations: z.array(z.string()),
 });
 export type TextPostPlan = z.infer<typeof TextPostPlanSchema>;
 

@@ -29,6 +29,11 @@ export interface AnalyticsMetrics {
   clicks: number;
   engagementRate: number;
   sentimentScore?: number;
+  /**
+   * Mission-appropriate metric (build-spec §2.7), e.g. completion rate or
+   * clarity score for DEBUNK / CIVIC_MECHANICS / MEDIA_LITERACY campaigns.
+   */
+  missionMetric?: number;
   raw?: unknown;
 }
 

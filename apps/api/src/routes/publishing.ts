@@ -52,6 +52,7 @@ export function publishingRoutes(ctx: AppContext) {
           saves: z.number().int().min(0).default(0),
           clicks: z.number().int().min(0).default(0),
           sentimentScore: z.number().min(-1).max(1).optional(),
+          missionMetric: z.number().min(0).optional(),
         })
         .parse(request.body);
       const snapshot = await analytics.recordMetrics(id, body);

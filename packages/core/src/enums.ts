@@ -56,7 +56,15 @@ export const ASSET_TYPES = [
 ] as const;
 export type AssetType = (typeof ASSET_TYPES)[number];
 
+/**
+ * build-spec §4.3 canonical types are the first four. The remainder are
+ * legacy values from product-plan §5.5, kept valid for compatibility.
+ */
 export const CAMPAIGN_TYPES = [
+  'PRODUCT_HYPE',
+  'EDUCATION',
+  'DEBUNK',
+  'CIVIC_MECHANICS',
   'APP_PROMOTION',
   'BRAND_AWARENESS',
   'PRODUCT_LAUNCH',
@@ -67,6 +75,29 @@ export const CAMPAIGN_TYPES = [
   'CUSTOM',
 ] as const;
 export type CampaignType = (typeof CAMPAIGN_TYPES)[number];
+
+/**
+ * Mission campaign types (build-spec §2.7): the learning loop must NOT
+ * optimize these for raw engagement/reach.
+ */
+export const MISSION_CAMPAIGN_TYPES = ['DEBUNK', 'CIVIC_MECHANICS', 'MEDIA_LITERACY'] as const;
+export type MissionCampaignType = (typeof MISSION_CAMPAIGN_TYPES)[number];
+
+export function isMissionCampaignType(type: string): type is MissionCampaignType {
+  return (MISSION_CAMPAIGN_TYPES as readonly string[]).includes(type);
+}
+
+export const OPTIMIZATION_TARGETS = [
+  'REACH',
+  'ENGAGEMENT',
+  'CLICKS',
+  'CLARITY',
+  'COMPLETION',
+] as const;
+export type OptimizationTarget = (typeof OPTIMIZATION_TARGETS)[number];
+
+/** Targets allowed for mission campaign types (build-spec §2.7). */
+export const MISSION_OPTIMIZATION_TARGETS = ['CLARITY', 'COMPLETION'] as const;
 
 export const DIRECTNESS_LEVELS = [
   'VERY_SUBTLE',

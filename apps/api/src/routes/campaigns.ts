@@ -6,10 +6,14 @@ import {
   CAMPAIGN_TYPES,
   CONTENT_TYPES,
   DIRECTNESS_LEVELS,
+  MISSION_OPTIMIZATION_TARGETS,
+  OPTIMIZATION_TARGETS,
   PLATFORMS,
   PLUG_FREQUENCIES,
   SOURCE_TYPES,
+  isMissionCampaignType,
   slugify,
+  type OptimizationTarget,
 } from '@hype/core';
 import type { AppContext } from '../context.js';
 
@@ -18,6 +22,8 @@ const CampaignBody = z.object({
   name: z.string().min(1),
   campaignType: z.enum(CAMPAIGN_TYPES).default('CUSTOM'),
   objective: z.string().default(''),
+  subject: z.string().optional(),
+  optimizationTarget: z.enum(OPTIMIZATION_TARGETS).optional(),
   targetAudience: z.string().optional(),
   productName: z.string().optional(),
   productDescription: z.string().optional(),
@@ -49,6 +55,26 @@ const GuardrailBody = z.object({
     .default({ allowCompetitorMentions: false, names: [] }),
 });
 
+/**
+ * Learning-loop constraint (build-spec §2.7): mission campaign types must
+ * not optimize for raw engagement/reach. Returns the resolved target or
+ * throws with a 4xx-worthy message.
+ */
+function resolveOptimizationTarget(
+  campaignType: string,
+  requested: OptimizationTarget | undefined,
+): OptimizationTarget {
+  if (isMissionCampaignType(campaignType)) {
+    if (requested && !(MISSION_OPTIMIZATION_TARGETS as readonly string[]).includes(requested)) {
+      throw new Error(
+        `${campaignType} campaigns cannot optimize for ${requested} (§2.7): allowed targets are ${MISSION_OPTIMIZATION_TARGETS.join(', ')}.`,
+      );
+    }
+    return requested ?? 'CLARITY';
+  }
+  return requested ?? 'REACH';
+}
+
 export function campaignRoutes(ctx: AppContext) {
   return async function routes(app: FastifyInstance) {
     app.get('/campaigns', async (request) => {
@@ -68,9 +94,33 @@ export function campaignRoutes(ctx: AppContext) {
       const raw = (request.body ?? {}) as Record<string, unknown>;
       const guardrails = raw.guardrails ? GuardrailBody.parse(raw.guardrails) : undefined;
       const campaign = CampaignBody.parse(raw);
+      const optimizationTarget = resolveOptimizationTarget(
+        campaign.campaignType,
+        campaign.optimizationTarget,
+      );
+
+      // Coordination guardrail (§2.4): a different persona may not run an
+      // ACTIVE campaign on the same subject at the same time.
+      const subject = (campaign.subject ?? campaign.productName ?? '').trim().toLowerCase();
+      if (subject) {
+        const overlapping = await ctx.prisma.campaign.findMany({
+          where: { personaId: { not: campaign.personaId }, status: 'ACTIVE' },
+          select: { subject: true, productName: true, persona: { select: { name: true } } },
+        });
+        const conflict = overlapping.find(
+          (c) => (c.subject ?? c.productName ?? '').trim().toLowerCase() === subject,
+        );
+        if (conflict) {
+          return reply.code(409).send({
+            error: `Coordination guardrail (§2.4): persona "${conflict.persona.name}" already runs an ACTIVE campaign on subject "${subject}". Multiple personas must not push the same message simultaneously.`,
+          });
+        }
+      }
+
       const created = await ctx.prisma.campaign.create({
         data: {
           ...campaign,
+          optimizationTarget,
           slug: slugify(campaign.name),
           guardrailConfig: guardrails
             ? {
@@ -103,6 +153,24 @@ export function campaignRoutes(ctx: AppContext) {
         .extend({ status: z.enum(['ACTIVE', 'PAUSED', 'ARCHIVED']).optional() })
         .omit({ personaId: true })
         .parse(rest);
+      if (body.campaignType || body.optimizationTarget) {
+        const existing = await ctx.prisma.campaign.findUniqueOrThrow({ where: { id } });
+        const effectiveType = body.campaignType ?? existing.campaignType;
+        if (isMissionCampaignType(effectiveType)) {
+          // Coerce a carried-over engagement target to CLARITY; reject an
+          // explicitly requested one (§2.7).
+          const carriedOver =
+            (MISSION_OPTIMIZATION_TARGETS as readonly string[]).includes(
+              existing.optimizationTarget,
+            )
+              ? existing.optimizationTarget
+              : undefined;
+          body.optimizationTarget = resolveOptimizationTarget(
+            effectiveType,
+            body.optimizationTarget ?? carriedOver,
+          );
+        }
+      }
       if (guardrails) {
         const parsed = GuardrailBody.parse(guardrails);
         await ctx.prisma.guardrailConfig.upsert({
@@ -146,6 +214,15 @@ export function campaignRoutes(ctx: AppContext) {
 
     app.post('/campaigns/:id/schedules', async (request, reply) => {
       const { id } = request.params as { id: string };
+      const campaign = await ctx.prisma.campaign.findUniqueOrThrow({ where: { id } });
+      if (campaign.campaignType === 'DEBUNK') {
+        // §7.1 open decision: until topic selection is settled, every debunk
+        // topic is human-picked per item — no automated generation cadence.
+        return reply.code(409).send({
+          error:
+            'DEBUNK campaigns cannot have automated schedules: a human picks every debunk topic (build-spec §7.1). Use POST /generation/run/:campaignId with claimToDebunk.',
+        });
+      }
       const body = z
         .object({
           platform: z.enum(PLATFORMS),

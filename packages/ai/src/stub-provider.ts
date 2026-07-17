@@ -30,14 +30,16 @@ export class StubLlmProvider implements LlmProvider {
     const kind = match?.[1];
     this.counter += 1;
 
+    const isDebunk = /^Type: DEBUNK$/m.test(input.userPrompt);
+
     let raw: unknown;
     switch (kind) {
       case 'SHORT_VIDEO':
-        raw = this.shortVideo();
+        raw = this.shortVideo(isDebunk);
         break;
       case 'TEXT_POST':
       case 'THREAD':
-        raw = this.textPost();
+        raw = isDebunk ? this.debunkPost(input.userPrompt) : this.textPost();
         break;
       case 'REPLY':
       case 'DM_REPLY':
@@ -67,7 +69,23 @@ export class StubLlmProvider implements LlmProvider {
     };
   }
 
-  private shortVideo(): ShortVideoPlan {
+  private debunkPost(userPrompt: string): TextPostPlan {
+    const claim = userPrompt.match(/claim[^:]*:\s*"([^"]+)"/i)?.[1] ?? 'the claim in question';
+    return {
+      body:
+        `Seen the claim that ${claim}? I checked the original source. The claim doesn't hold up: ` +
+        `the primary record says otherwise. Judge the evidence yourself — link below.`,
+      hook: `That viral claim? I read the original source.`,
+      cta: '',
+      hashtags: [],
+      campaignPlugType: 'NONE',
+      whyThisShouldWork: 'Calm, source-first correction; no side-taking.',
+      riskNotes: [],
+      sourceCitations: ['https://example.org/primary-source'],
+    };
+  }
+
+  private shortVideo(isDebunk = false): ShortVideoPlan {
     const hooks = [
       `I'm 80 years old and I just found an app that teaches better than half the textbooks I grew up with.`,
       `Fifty years of teaching, and a phone app just made me jealous.`,
@@ -105,10 +123,11 @@ export class StubLlmProvider implements LlmProvider {
         },
       ],
       thumbnailIdea: 'Steve squinting at a phone, caption "THIS teaches better than I did?!"',
-      campaignPlugType: 'CASUAL',
+      campaignPlugType: isDebunk ? 'NONE' : 'CASUAL',
       whyThisShouldWork:
         'Contrast of an 80-year-old professor praising new tech is inherently shareable; the plug is native to the story.',
       riskNotes: [],
+      sourceCitations: isDebunk ? ['https://example.org/primary-source'] : [],
     };
   }
 
@@ -130,6 +149,7 @@ export class StubLlmProvider implements LlmProvider {
       whyThisShouldWork:
         'Credibility of a veteran teacher plus a mildly contrarian framing drives replies.',
       riskNotes: [],
+      sourceCitations: [],
     };
   }
 

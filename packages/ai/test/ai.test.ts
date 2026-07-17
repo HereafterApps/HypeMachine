@@ -25,6 +25,7 @@ const persona = {
 
 const campaign = {
   name: 'GuidedGenius',
+  campaignType: 'PRODUCT_HYPE',
   objective: 'Awareness',
   productName: 'GuidedGenius',
   productDescription: 'AI tutoring app',
@@ -99,6 +100,24 @@ describe('StubLlmProvider', () => {
       schema: TextPostPlanSchema,
     });
     expect(a.data.body).not.toBe(b.data.body);
+  });
+
+  it('produces cited, advocacy-free content for DEBUNK campaigns', async () => {
+    const debunkPrompt = buildGenerationPrompt({
+      campaign: { ...campaign, campaignType: 'DEBUNK', subject: 'edited classroom clip' },
+      platform: { platform: 'X', contentType: 'TEXT_POST' },
+      outputKind: 'TEXT_POST',
+      extraInstructions: `The specific claim to debunk (human-selected): "the clip shows a full lesson"`,
+      includePlug: false,
+    });
+    expect(debunkPrompt).toContain('DEBUNK rules');
+    const result = await stub.generateStructured({
+      systemPrompt: system,
+      userPrompt: debunkPrompt,
+      schema: TextPostPlanSchema,
+    });
+    expect(result.data.sourceCitations.length).toBeGreaterThan(0);
+    expect(result.data.body).not.toMatch(/vote (for|against)/i);
   });
 
   it('rejects prompts without an output-kind marker', async () => {

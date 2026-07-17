@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { runGuardrails, textSimilarity, type GuardrailPolicy } from '../src/index.js';
 
 const policy: GuardrailPolicy = {
+  campaignType: 'PRODUCT_HYPE',
   allowedTopics: ['education', 'edtech'],
   bannedTopics: ['medical claims'],
   allowedClaims: ['GuidedGenius helps make learning interactive.'],
@@ -20,6 +21,7 @@ function content(overrides: Partial<Parameters<typeof runGuardrails>[1]> = {}) {
     hashtags: ['#edtech'],
     campaignPlugType: 'CASUAL' as const,
     riskNotes: [],
+    sourceCitations: [] as string[],
     recentTexts: [],
     ...overrides,
   };
@@ -82,6 +84,86 @@ describe('runGuardrails', () => {
       }),
     );
     expect(result.warnings.some((w) => w.includes('duplicate'))).toBe(true);
+  });
+});
+
+describe('political content policy (build-spec §2.6)', () => {
+  const debunkPolicy: GuardrailPolicy = { ...policy, campaignType: 'DEBUNK' };
+
+  it('blocks advocacy in DEBUNK content (test A)', () => {
+    const result = runGuardrails(
+      debunkPolicy,
+      content({
+        texts: [
+          {
+            label: 'body',
+            value:
+              'The clip is edited — here is the raw footage. So vote against the measure this fall.',
+          },
+        ],
+        sourceCitations: ['https://example.org/raw-footage'],
+      }),
+    );
+    expect(result.passed).toBe(false);
+    expect(result.blockers.join(' ')).toMatch(/advocacy/i);
+  });
+
+  it('blocks DEBUNK content without a primary source citation', () => {
+    const result = runGuardrails(
+      debunkPolicy,
+      content({
+        texts: [{ label: 'body', value: 'That viral claim is false. Trust me.' }],
+        sourceCitations: [],
+      }),
+    );
+    expect(result.passed).toBe(false);
+    expect(result.blockers.join(' ')).toMatch(/primary source/i);
+  });
+
+  it('passes a cited, advocacy-free debunk and reminds the reviewer of tests A & B', () => {
+    const result = runGuardrails(
+      debunkPolicy,
+      content({
+        texts: [
+          {
+            label: 'body',
+            value:
+              'The viral clip cuts off at 0:41. The full recording shows the question being answered. Judge the evidence yourself.',
+          },
+        ],
+        sourceCitations: ['https://example.org/full-recording'],
+      }),
+    );
+    expect(result.passed).toBe(true);
+    expect(result.warnings.join(' ')).toMatch(/Reviewer must confirm/);
+    expect(
+      result.checklist.find((c) => c.label.includes('Primary source'))?.passed,
+    ).toBe(true);
+  });
+
+  it('does not apply advocacy blockers to product campaigns', () => {
+    const result = runGuardrails(
+      policy,
+      content({
+        texts: [{ label: 'body', value: 'Vote for your favorite flavor in the replies!' }],
+      }),
+    );
+    expect(result.passed).toBe(true);
+  });
+
+  it('blocks advocacy in CIVIC_MECHANICS content', () => {
+    const result = runGuardrails(
+      { ...policy, campaignType: 'CIVIC_MECHANICS' },
+      content({
+        texts: [
+          {
+            label: 'body',
+            value: 'Ranked-choice voting counts ballots in rounds. You should support the party that backs it.',
+          },
+        ],
+      }),
+    );
+    expect(result.passed).toBe(false);
   });
 });
 

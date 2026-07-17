@@ -70,6 +70,12 @@ enum AssetType {
 }
 
 enum CampaignType {
+  // Canonical (build-spec §4.3)
+  PRODUCT_HYPE
+  EDUCATION
+  DEBUNK
+  CIVIC_MECHANICS
+  // Legacy (product-plan §5.5) — still valid
   APP_PROMOTION
   BRAND_AWARENESS
   PRODUCT_LAUNCH
@@ -78,6 +84,14 @@ enum CampaignType {
   EXPLAINER
   COMMUNITY_BUILDING
   CUSTOM
+}
+
+enum OptimizationTarget {
+  REACH
+  ENGAGEMENT
+  CLICKS
+  CLARITY
+  COMPLETION
 }
 
 enum DirectnessLevel {
@@ -277,6 +291,12 @@ model Campaign {
   status             EntityStatus    @default(ACTIVE)
   campaignType       CampaignType    @default(CUSTOM)
   objective          String          @default("")
+  // Campaign subject/topic (build-spec §4.3) — also the key for the
+  // cross-persona coordination check (§2.4). Defaults to productName.
+  subject            String?
+  // Learning-loop target (build-spec §2.7); mission types are locked to
+  // CLARITY/COMPLETION at the service layer.
+  optimizationTarget OptimizationTarget @default(REACH)
   targetAudience     String?
   productName        String?
   productDescription String?
@@ -398,6 +418,7 @@ model GeneratedContent {
   cta                String?
   generationPrompt   String?
   generationMetadata Json?
+  sourceCitations    String[]      @default([])
   riskScore          Int?
   guardrailResult    Json?
   scheduledFor       DateTime?
@@ -482,6 +503,7 @@ model AnalyticsSnapshot {
   clicks          Int      @default(0)
   engagementRate  Float    @default(0)
   sentimentScore  Float?
+  missionMetric   Float?
   rawMetrics      Json?
   capturedAt      DateTime @default(now())
 

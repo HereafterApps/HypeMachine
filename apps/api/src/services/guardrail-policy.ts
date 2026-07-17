@@ -11,6 +11,7 @@ export function buildPolicyFromCampaign(
     names?: string[];
   };
   return {
+    campaignType: campaign.campaignType,
     allowedTopics: config?.allowedTopics ?? [],
     bannedTopics: config?.bannedTopics ?? [],
     allowedClaims: config?.allowedClaims ?? [],
@@ -36,6 +37,7 @@ export function evaluateContentFields(
     hashtags: string[];
     campaignPlugType?: CampaignPlugType;
     riskNotes?: string[];
+    sourceCitations?: string[];
     recentTexts?: string[];
   },
 ): GuardrailResult {
@@ -52,6 +54,7 @@ export function evaluateContentFields(
     hashtags: input.hashtags,
     campaignPlugType: input.campaignPlugType ?? 'NONE',
     riskNotes: input.riskNotes ?? [],
+    sourceCitations: input.sourceCitations ?? [],
     recentTexts: input.recentTexts ?? [],
   });
 }

@@ -118,7 +118,8 @@ describe('demo scenario (§26): persona → campaign → generate → approve �
     const campaign = await api('POST', '/campaigns', {
       personaId,
       name: 'e2e GuidedGenius',
-      campaignType: 'APP_PROMOTION',
+      campaignType: 'PRODUCT_HYPE',
+      subject: 'GuidedGenius E2E',
       objective: 'Get views and engagement for GuidedGenius.',
       targetAudience: 'parents, students, teachers',
       productName: 'GuidedGenius',
@@ -138,6 +139,7 @@ describe('demo scenario (§26): persona → campaign → generate → approve �
     });
     expect(campaign.status).toBe(201);
     expect(campaign.body.guardrailConfig.bannedClaims).toContain('guaranteed marks improvement');
+    expect(campaign.body.optimizationTarget).toBe('REACH');
     campaignId = campaign.body.id;
 
     const source = await api('POST', `/campaigns/${campaignId}/sources`, {
@@ -366,6 +368,104 @@ describe('demo scenario (§26): persona → campaign → generate → approve �
     });
     expect(schedule.nextRunAt!.getTime()).toBeGreaterThan(Date.now() - 60_000);
   }, 30_000);
+
+  it('enforces build-spec §2.6/§2.7/§7.1 on DEBUNK campaigns', async () => {
+    // §2.7: DEBUNK cannot optimize for engagement/reach.
+    const badTarget = await api('POST', '/campaigns', {
+      personaId,
+      name: 'e2e Bad Debunk',
+      campaignType: 'DEBUNK',
+      subject: 'e2e viral claim',
+      optimizationTarget: 'REACH',
+    });
+    expect(badTarget.status).toBe(409);
+    expect(badTarget.body.error).toMatch(/cannot optimize for REACH/);
+
+    // Defaults to CLARITY when unspecified.
+    const debunk = await api('POST', '/campaigns', {
+      personaId,
+      name: 'e2e Debunk Claims',
+      campaignType: 'DEBUNK',
+      subject: 'e2e viral claim',
+      objective: 'Debunk specific viral claims with primary sources.',
+    });
+    expect(debunk.status).toBe(201);
+    expect(debunk.body.optimizationTarget).toBe('CLARITY');
+    const debunkId = debunk.body.id;
+
+    // §7.1 (conservative default): no automated schedules for DEBUNK.
+    const schedule = await api('POST', `/campaigns/${debunkId}/schedules`, {
+      platform: 'X',
+      contentType: 'TEXT_POST',
+      cadenceType: 'INTERVAL',
+      intervalMinutes: 720,
+    });
+    expect(schedule.status).toBe(409);
+    expect(schedule.body.error).toMatch(/human picks every debunk topic/);
+
+    // Generation requires a human-selected claim.
+    const noClaim = await api('POST', `/generation/run/${debunkId}`, {
+      platform: 'X',
+      contentType: 'TEXT_POST',
+    });
+    expect(noClaim.status).toBe(409);
+    expect(noClaim.body.error).toMatch(/claimToDebunk/);
+
+    // With a claim: content generates, cites a source, passes guardrails.
+    const generated = await api('POST', `/generation/run/${debunkId}`, {
+      platform: 'X',
+      contentType: 'TEXT_POST',
+      claimToDebunk: 'the viral clip shows the whole exchange',
+    });
+    expect(generated.status).toBe(201);
+    expect(generated.body.content.status).toBe('PENDING_APPROVAL');
+    expect(generated.body.content.sourceCitations.length).toBeGreaterThan(0);
+    expect(generated.body.guardrails.warnings.join(' ')).toMatch(/Reviewer must confirm/);
+
+    // §2.6 test A: sneaking advocacy in via edit gets blocked.
+    const advocacyEdit = await api('POST', `/approvals/${generated.body.content.id}/edit`, {
+      bodyText: 'The clip is edited — and that is why you should vote against the measure.',
+    });
+    expect(advocacyEdit.body.status).toBe('NEEDS_EDIT');
+    const blocked = await api('POST', `/approvals/${generated.body.content.id}/approve`, {});
+    expect(blocked.status).toBe(409);
+
+    // Removing citations via edit is also blocked for DEBUNK.
+    const noCitations = await api('POST', `/approvals/${generated.body.content.id}/edit`, {
+      bodyText: 'The clip cuts off early; the full recording shows the answer.',
+      sourceCitations: [],
+    });
+    expect(noCitations.body.status).toBe('NEEDS_EDIT');
+
+    await api('PATCH', `/campaigns/${debunkId}`, { status: 'ARCHIVED' });
+  });
+
+  it('blocks cross-persona coordination on the same subject (§2.4)', async () => {
+    const second = await api('POST', '/personas', {
+      name: 'e2e GadgetGwen',
+      personaType: 'VIRTUAL_INFLUENCER',
+      disclosureText: 'Virtual AI-driven creator.',
+    });
+    expect(second.status).toBe(201);
+
+    const conflicting = await api('POST', '/campaigns', {
+      personaId: second.body.id,
+      name: 'e2e GG Echo',
+      campaignType: 'PRODUCT_HYPE',
+      subject: 'GuidedGenius E2E', // same subject as the first persona's active campaign
+    });
+    expect(conflicting.status).toBe(409);
+    expect(conflicting.body.error).toMatch(/Coordination guardrail/);
+
+    // A different subject is fine.
+    const distinct = await api('POST', '/campaigns', {
+      personaId: second.body.id,
+      name: 'e2e GG Gadgets',
+      campaignType: 'PRODUCT_HYPE',
+      subject: 'e2e gadget reviews',
+    });
+    expect(distinct.status).toBe(201);
+  });
 
   it('records job logs with cost tracking (§24, §25)', async () => {
     const logs = await api('GET', '/settings/jobs');

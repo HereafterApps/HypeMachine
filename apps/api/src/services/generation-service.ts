@@ -28,6 +28,12 @@ export interface GenerateRequest {
   scheduledFor?: Date;
   /** For replies: the audience comment/DM being answered (own posts only). */
   replyingTo?: string;
+  /**
+   * DEBUNK campaigns: the specific claim to debunk, chosen by a human.
+   * Required for every DEBUNK generation — topic selection is human-per-item
+   * until build-spec §7.1 is resolved.
+   */
+  claimToDebunk?: string;
 }
 
 const PLUG_TARGETS: Record<string, number | null> = {
@@ -83,6 +89,12 @@ export class GenerationService {
     if (campaign.persona.status !== 'ACTIVE') {
       throw new Error(`Persona ${campaign.persona.slug} is ${campaign.persona.status}, not ACTIVE.`);
     }
+    if (campaign.campaignType === 'DEBUNK' && !request.claimToDebunk) {
+      throw new Error(
+        'DEBUNK generation requires claimToDebunk: a human picks every debunk topic (build-spec §7.1 open decision — conservative default).',
+      );
+    }
+    await this.assertNoCrossPersonaCoordination(campaign);
 
     const recent = await this.ctx.prisma.generatedContent.findMany({
       where: { campaignId: campaign.id, contentType: request.contentType },
@@ -108,6 +120,8 @@ export class GenerationService {
     const policy = buildPolicyFromCampaign(campaign);
     const campaignPrompt: CampaignPromptInput = {
       name: campaign.name,
+      campaignType: campaign.campaignType,
+      subject: campaign.subject,
       objective: campaign.objective,
       productName: campaign.productName,
       productDescription: campaign.productDescription,
@@ -142,6 +156,9 @@ export class GenerationService {
 
     const extras = [
       request.extraInstructions,
+      request.claimToDebunk
+        ? `The specific claim to debunk (human-selected): "${request.claimToDebunk}"`
+        : undefined,
       request.replyingTo
         ? `You are replying, as the persona, to this comment on the persona's OWN post:\n"${request.replyingTo}"`
         : undefined,
@@ -158,7 +175,7 @@ export class GenerationService {
       includePlug,
     });
 
-    const { fields, plugType, riskNotes, metadata, usage } = await this.callModel(
+    const { fields, plugType, riskNotes, sourceCitations, metadata, usage } = await this.callModel(
       request.contentType,
       systemPrompt,
       userPrompt,
@@ -177,6 +194,7 @@ export class GenerationService {
       hashtags: fields.hashtags,
       campaignPlugType: plugType,
       riskNotes,
+      sourceCitations,
       recentTexts: recent.map((c) =>
         [c.title, c.hook, c.script, c.bodyText].filter(Boolean).join('\n'),
       ),
@@ -190,6 +208,7 @@ export class GenerationService {
         contentType: request.contentType,
         status: guardrails.passed ? 'PENDING_APPROVAL' : 'NEEDS_EDIT',
         ...fields,
+        sourceCitations,
         generationPrompt: userPrompt,
         generationMetadata: { ...metadata, plugType, usage: { ...usage } },
         riskScore: guardrails.riskScore,
@@ -257,6 +276,7 @@ export class GenerationService {
     };
     plugType: ShortVideoPlan['campaignPlugType'];
     riskNotes: string[];
+    sourceCitations: string[];
     metadata: Record<string, unknown>;
     usage: LlmUsage;
   }> {
@@ -278,6 +298,7 @@ export class GenerationService {
           },
           plugType: data.campaignPlugType,
           riskNotes: data.riskNotes,
+          sourceCitations: data.sourceCitations,
           metadata: {
             visualDirection: data.visualDirection,
             cameraStyle: data.cameraStyle,
@@ -305,6 +326,7 @@ export class GenerationService {
           },
           plugType: data.campaignPlugType,
           riskNotes: data.riskNotes,
+          sourceCitations: data.sourceCitations,
           metadata: { whyThisShouldWork: data.whyThisShouldWork },
           usage,
         };
@@ -319,6 +341,7 @@ export class GenerationService {
         });
         return {
           fields: { bodyText: data.reply, hashtags: [] },
+          sourceCitations: [],
           plugType: data.shouldMentionCampaign ? 'CASUAL' : 'NONE',
           riskNotes: data.escalateToHuman
             ? [`Escalate to human: ${data.reason}`]
@@ -331,6 +354,36 @@ export class GenerationService {
       }
       default:
         throw new Error(`Content type ${contentType} is not supported for generation yet.`);
+    }
+  }
+
+  /**
+   * Sockpuppet-coordination guardrail (build-spec §2.4): block generation
+   * when a DIFFERENT persona is simultaneously running an active campaign on
+   * the same subject — many personas pushing one message simulates organic
+   * consensus, which disclosure per-account does not cure.
+   */
+  private async assertNoCrossPersonaCoordination(campaign: Campaign) {
+    const subject = (campaign.subject ?? campaign.productName ?? '').trim().toLowerCase();
+    if (!subject) return;
+    const overlapping = await this.ctx.prisma.campaign.findMany({
+      where: {
+        id: { not: campaign.id },
+        personaId: { not: campaign.personaId },
+        status: 'ACTIVE',
+      },
+      select: { subject: true, productName: true, persona: { select: { name: true } } },
+    });
+    const conflicts = overlapping.filter(
+      (c) => ((c.subject ?? c.productName ?? '').trim().toLowerCase() || null) === subject,
+    );
+    if (conflicts.length > 0) {
+      throw new Error(
+        `Coordination guardrail (§2.4): persona(s) ${conflicts
+          .map((c) => `"${c.persona.name}"`)
+          .join(', ')} already run an ACTIVE campaign on subject "${subject}". ` +
+          `Multiple personas must not push the same message simultaneously — pause one campaign first.`,
+      );
     }
   }
 

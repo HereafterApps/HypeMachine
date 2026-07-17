@@ -25,6 +25,7 @@ export class AnalyticsService {
         clicks: metrics.clicks,
         engagementRate: rate,
         sentimentScore: metrics.sentimentScore,
+        missionMetric: metrics.missionMetric,
         rawMetrics: metrics.raw ? JSON.parse(JSON.stringify(metrics.raw)) : undefined,
       },
     });
@@ -83,9 +84,18 @@ export class AnalyticsService {
           .map((p) => {
             const s = p.snapshots[0]!;
             const c = p.generatedContent;
-            return `- [${c.contentType}/${p.platform}] hook="${c.hook ?? ''}" views=${s.views} engagement=${s.engagementRate}% broll=${c.contentType === 'SHORT_VIDEO' ? 'yes' : 'n/a'}`;
+            const mission =
+              s.missionMetric != null ? ` missionMetric=${s.missionMetric}` : '';
+            return `- [${c.contentType}/${p.platform}] hook="${c.hook ?? ''}" views=${s.views} engagement=${s.engagementRate}%${mission} broll=${c.contentType === 'SHORT_VIDEO' ? 'yes' : 'n/a'}`;
           })
           .join('\n');
+
+        // Learning-loop constraint (build-spec §2.7): mission campaigns must
+        // not be optimized toward raw engagement/reach.
+        const missionTarget = ['CLARITY', 'COMPLETION'].includes(campaign.optimizationTarget);
+        const optimizationInstruction = missionTarget
+          ? `This campaign optimizes for ${campaign.optimizationTarget} (mission metric). Do NOT recommend maximizing raw engagement, reach, or outrage — evaluate what improved clarity/completion, even at the cost of views.`
+          : `This campaign optimizes for ${campaign.optimizationTarget}.`;
 
         const systemPrompt = buildSystemPrompt({
           name: campaign.persona.name,
@@ -100,6 +110,7 @@ export class AnalyticsService {
         const userPrompt = [
           `Analyze this campaign's published content performance and produce ONE actionable learning insight.`,
           `Campaign: ${campaign.name} — ${campaign.objective}`,
+          optimizationInstruction,
           `Performance:`,
           performanceTable,
           '',

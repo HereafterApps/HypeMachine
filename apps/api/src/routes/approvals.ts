@@ -59,6 +59,7 @@ export function approvalRoutes(ctx: AppContext) {
           bodyText: z.string().optional(),
           hashtags: z.array(z.string()).optional(),
           cta: z.string().optional(),
+          sourceCitations: z.array(z.string()).optional(),
           scheduledFor: z.coerce.date().nullable().optional(),
           editInstruction: z.string().optional(),
           userId: z.string().optional(),

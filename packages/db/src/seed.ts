@@ -118,13 +118,19 @@ export async function seed(): Promise<{ owner: User; steve: Persona; campaign: C
 
   const campaign = await prisma.campaign.upsert({
     where: { personaId_slug: { personaId: steve.id, slug: 'guidedgenius' } },
-    update: {},
+    update: {
+      campaignType: 'PRODUCT_HYPE',
+      subject: 'GuidedGenius',
+      optimizationTarget: 'REACH',
+    },
     create: {
       personaId: steve.id,
       name: 'GuidedGenius',
       slug: 'guidedgenius',
       status: 'ACTIVE',
-      campaignType: 'APP_PROMOTION',
+      campaignType: 'PRODUCT_HYPE',
+      subject: 'GuidedGenius',
+      optimizationTarget: 'REACH',
       objective:
         'Get views and engagement while making GuidedGenius feel useful, smart, and worth trying.',
       targetAudience: 'parents, students, teachers, edtech users',
