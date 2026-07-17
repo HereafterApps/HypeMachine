@@ -9,7 +9,13 @@ async function main() {
 
   await jobs.start();
   await app.listen({ port: ctx.env.API_PORT, host: '0.0.0.0' });
-  app.log.info(`Hype Machine API on :${ctx.env.API_PORT} (llm=${ctx.llm.name}, storage=${ctx.storage.driver})`);
+  const pipelineStatus = await ctx.pipeline
+    .health()
+    .then((h) => `pipeline=${h.provider}`)
+    .catch(() => 'pipeline=UNREACHABLE (start with `pnpm dev:pipeline`)');
+  app.log.info(
+    `Hype Machine API on :${ctx.env.API_PORT} (${pipelineStatus}, storage=${ctx.storage.driver})`,
+  );
 
   const shutdown = async () => {
     await jobs.stop();

@@ -1,16 +1,17 @@
 import type { PrismaClient } from '@hype/db';
 import { getPrisma } from '@hype/db';
-import { createLlmProvider, type LlmProvider } from '@hype/ai';
 import { createNotifier, type Notifier } from '@hype/notifications';
 import { PublishingRegistry } from '@hype/publishing';
 import { createStorageAdapter, type StorageAdapter } from '@hype/storage';
 import { loadEnv, type Env } from './env.js';
 import { TokenCrypto } from './lib/crypto.js';
+import { PipelineClient } from './lib/pipeline-client.js';
 
 export interface AppContext {
   env: Env;
   prisma: PrismaClient;
-  llm: LlmProvider;
+  /** Python pipeline service: generation, guardrails, learning insights. */
+  pipeline: PipelineClient;
   storage: StorageAdapter;
   notifier: Notifier;
   publishing: PublishingRegistry;
@@ -23,7 +24,7 @@ export function createContext(overrides: Partial<AppContext> = {}): AppContext {
   return {
     env,
     prisma: overrides.prisma ?? getPrisma(),
-    llm: overrides.llm ?? createLlmProvider(env.LLM_PROVIDER),
+    pipeline: overrides.pipeline ?? new PipelineClient(env.PIPELINE_URL, env.PIPELINE_TOKEN),
     storage,
     notifier: overrides.notifier ?? createNotifier(),
     publishing: overrides.publishing ?? new PublishingRegistry(storage),

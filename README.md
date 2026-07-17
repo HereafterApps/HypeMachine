@@ -47,13 +47,21 @@ detailed reference plan,
 [`docs/architecture.md`](docs/architecture.md) for how this implementation
 maps to it, and [`docs/setup.md`](docs/setup.md) to get running in ~2 minutes.
 
+## Stack (hybrid, per build-spec §4.1)
+
+React+Vite control panel → TypeScript control plane (Fastify, Prisma,
+BullMQ, publishing adapters) → **Python/FastAPI pipeline service**
+(prompts, Claude structured outputs, guardrail engine, learning loop).
+
 ## Quick start
 
 ```bash
-pnpm install && cp .env.example .env
+pnpm install && (cd apps/pipeline && uv sync) && cp .env.example .env
 pnpm dev:infra                     # local Postgres 16 + Redis 7, no Docker
 pnpm db:migrate && pnpm db:seed    # schema + Professor Steve / GuidedGenius
+pnpm dev:pipeline                  # Python pipeline on :8300
 pnpm dev:api                       # API + workers on :3001
+pnpm dev:web                       # control panel on :3000
 ```
 
 Runs fully offline with `LLM_PROVIDER=stub`; set `LLM_PROVIDER=anthropic` +

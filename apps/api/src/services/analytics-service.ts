@@ -1,14 +1,13 @@
-import { LearningInsightPlanSchema, engagementRate, type AnalyticsMetrics } from '@hype/core';
-import { buildSystemPrompt, OUTPUT_KIND_MARKER } from '@hype/ai';
+import { engagementRate, type AnalyticsMetrics } from '@hype/core';
 import { MetricsUnavailableError } from '@hype/publishing';
 import type { AppContext } from '../context.js';
 import { withJobLog } from './job-log.js';
 
-/** Analytics ingestion + learning loop (product-plan §7.8, §12). */
+/** Analytics ingestion + learning loop (build-spec M4, product-plan §7.8/§12). */
 export class AnalyticsService {
   constructor(private readonly ctx: AppContext) {}
 
-  /** Manual metric entry fallback (§21 Phase 6) — also used by tests. */
+  /** Manual metric entry fallback — also used by tests. */
   async recordMetrics(
     publishedPostId: string,
     metrics: Omit<AnalyticsMetrics, 'engagementRate'> & { engagementRate?: number },
@@ -55,14 +54,15 @@ export class AnalyticsService {
   }
 
   /**
-   * Learning loop (§12): compare performance across a campaign's posts,
-   * generate an insight, store it AND write it into persona memory so future
-   * generations adapt.
+   * Learning loop: compare performance across a campaign's posts via the
+   * pipeline service, store the insight AND write it into persona memory so
+   * future generations adapt. Mission campaigns are never optimized for raw
+   * engagement (build-spec §2.7) — the pipeline enforces the instruction.
    */
   async generateInsights(campaignId: string) {
     return withJobLog(
       this.ctx,
-      { jobName: 'GenerateLearningInsightsJob', campaignId, provider: this.ctx.llm.name },
+      { jobName: 'GenerateLearningInsightsJob', campaignId, provider: 'pipeline' },
       async () => {
         const campaign = await this.ctx.prisma.campaign.findUniqueOrThrow({
           where: { id: campaignId },
@@ -80,49 +80,31 @@ export class AnalyticsService {
           return { insight: null, reason: 'Need at least 2 posts with metrics to compare.' };
         }
 
-        const performanceTable = withMetrics
-          .map((p) => {
-            const s = p.snapshots[0]!;
-            const c = p.generatedContent;
-            const mission =
-              s.missionMetric != null ? ` missionMetric=${s.missionMetric}` : '';
-            return `- [${c.contentType}/${p.platform}] hook="${c.hook ?? ''}" views=${s.views} engagement=${s.engagementRate}%${mission} broll=${c.contentType === 'SHORT_VIDEO' ? 'yes' : 'n/a'}`;
-          })
-          .join('\n');
-
-        // Learning-loop constraint (build-spec §2.7): mission campaigns must
-        // not be optimized toward raw engagement/reach.
-        const missionTarget = ['CLARITY', 'COMPLETION'].includes(campaign.optimizationTarget);
-        const optimizationInstruction = missionTarget
-          ? `This campaign optimizes for ${campaign.optimizationTarget} (mission metric). Do NOT recommend maximizing raw engagement, reach, or outrage — evaluate what improved clarity/completion, even at the cost of views.`
-          : `This campaign optimizes for ${campaign.optimizationTarget}.`;
-
-        const systemPrompt = buildSystemPrompt({
-          name: campaign.persona.name,
-          backstory: campaign.persona.backstory,
-          worldview: campaign.persona.worldview,
-          speakingStyle: campaign.persona.speakingStyle,
-          tone: campaign.persona.tone,
-          humorStyle: campaign.persona.humorStyle,
-          disclosureText: campaign.persona.disclosureText,
-          memoryHighlights: [],
-        });
-        const userPrompt = [
-          `Analyze this campaign's published content performance and produce ONE actionable learning insight.`,
-          `Campaign: ${campaign.name} — ${campaign.objective}`,
-          optimizationInstruction,
-          `Performance:`,
-          performanceTable,
-          '',
-          `${OUTPUT_KIND_MARKER} LEARNING_INSIGHT`,
-        ].join('\n');
-
-        const { data, usage } = await this.ctx.llm.generateStructured({
-          systemPrompt,
-          userPrompt,
-          schema: LearningInsightPlanSchema,
+        const performanceLines = withMetrics.map((p) => {
+          const s = p.snapshots[0]!;
+          const c = p.generatedContent;
+          const mission = s.missionMetric != null ? ` missionMetric=${s.missionMetric}` : '';
+          return `- [${c.contentType}/${p.platform}] hook="${c.hook ?? ''}" views=${s.views} engagement=${s.engagementRate}%${mission} broll=${c.contentType === 'SHORT_VIDEO' ? 'yes' : 'n/a'}`;
         });
 
+        const result = await this.ctx.pipeline.insights({
+          persona: {
+            name: campaign.persona.name,
+            backstory: campaign.persona.backstory,
+            worldview: campaign.persona.worldview,
+            speakingStyle: campaign.persona.speakingStyle,
+            tone: campaign.persona.tone,
+            humorStyle: campaign.persona.humorStyle,
+            disclosureText: campaign.persona.disclosureText,
+            memoryHighlights: [],
+          },
+          campaignName: campaign.name,
+          objective: campaign.objective,
+          optimizationTarget: campaign.optimizationTarget,
+          performanceLines,
+        });
+
+        const data = result.insight;
         const insight = await this.ctx.prisma.learningInsight.create({
           data: {
             personaId: campaign.personaId,
@@ -134,7 +116,7 @@ export class AnalyticsService {
           },
         });
 
-        // §12.3 — every learning insight becomes persona memory.
+        // Every learning insight becomes persona memory (§12.3).
         await this.ctx.prisma.personaMemory.create({
           data: {
             personaId: campaign.personaId,
@@ -146,7 +128,7 @@ export class AnalyticsService {
           },
         });
 
-        return { insight, costUsd: usage.costUsd };
+        return { insight, costUsd: result.usage.costUsd };
       },
     );
   }

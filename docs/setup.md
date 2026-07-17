@@ -1,8 +1,14 @@
 # Setup
 
+The stack is hybrid (build-spec §4.1, decided): **TypeScript** control plane
+(Fastify API, BullMQ workers, Prisma/Postgres, publishing adapters, React
+control panel) + **Python/FastAPI** pipeline service (generation, guardrail
+engine, learning insights).
+
 ## Prerequisites
 
 - Node.js ≥ 20, pnpm ≥ 9
+- Python ≥ 3.11 + [uv](https://docs.astral.sh/uv/)
 - PostgreSQL 16 and Redis 7 — either your own, or the bundled no-Docker dev
   infra (`scripts/dev-infra.sh`), or Docker equivalents
 
@@ -10,6 +16,7 @@
 
 ```bash
 pnpm install
+(cd apps/pipeline && uv sync)
 cp .env.example .env
 
 # 1. Local Postgres + Redis (no Docker needed; state in .dev-infra/)
@@ -19,9 +26,14 @@ pnpm dev:infra
 pnpm db:migrate      # prisma migrate dev
 pnpm db:seed
 
-# 3. Run the API + workers
-pnpm dev:api         # http://localhost:3001, auth: Bearer $API_TOKEN
+# 3. Run the three services (separate terminals)
+pnpm dev:pipeline    # Python pipeline on :8300 (LLM_PROVIDER=stub → keyless)
+pnpm dev:api         # API + workers on :3001, auth: Bearer $API_TOKEN
+pnpm dev:web         # control panel on http://localhost:3000
 ```
+
+Open http://localhost:3000 — Settings → set the API token (default
+`change-me`), then use Personas / Campaigns / Approval Queue.
 
 Smoke test:
 

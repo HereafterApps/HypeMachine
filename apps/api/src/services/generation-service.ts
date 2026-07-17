@@ -1,21 +1,7 @@
-import {
-  ReplyPlanSchema,
-  ShortVideoPlanSchema,
-  TextPostPlanSchema,
-  type GuardrailResult,
-  type ReplyPlan,
-  type ShortVideoPlan,
-  type TextPostPlan,
-} from '@hype/core';
-import {
-  buildGenerationPrompt,
-  buildSystemPrompt,
-  type CampaignPromptInput,
-  type LlmUsage,
-} from '@hype/ai';
-import { runGuardrails } from '@hype/guardrails';
+import type { GuardrailResult } from '@hype/core';
 import type { Campaign, ContentType, GeneratedContent, Platform } from '@hype/db';
 import type { AppContext } from '../context.js';
+import type { PipelineUsage } from '../lib/pipeline-client.js';
 import { MemoryService } from './memory-service.js';
 import { withJobLog } from './job-log.js';
 import { buildPolicyFromCampaign, contentPlugType } from './guardrail-policy.js';
@@ -45,6 +31,11 @@ const PLUG_TARGETS: Record<string, number | null> = {
   RARE: 10,
 };
 
+/**
+ * Orchestrates content generation: loads context from the DB, delegates
+ * generation + guardrail checks to the Python pipeline service, persists the
+ * result, and opens the approval.
+ */
 export class GenerationService {
   private readonly memory: MemoryService;
 
@@ -58,11 +49,7 @@ export class GenerationService {
   }> {
     return withJobLog(
       this.ctx,
-      {
-        jobName: 'GenerateContentJob',
-        campaignId: request.campaignId,
-        provider: this.ctx.llm.name,
-      },
+      { jobName: 'GenerateContentJob', campaignId: request.campaignId, provider: 'pipeline' },
       async () => {
         const result = await this.generateInner(request);
         return { ...result, costUsd: result.usage.costUsd };
@@ -73,12 +60,11 @@ export class GenerationService {
   private async generateInner(request: GenerateRequest): Promise<{
     content: GeneratedContent;
     guardrails: GuardrailResult;
-    usage: LlmUsage;
+    usage: PipelineUsage;
   }> {
     if (request.contentType === 'IMAGE_CAROUSEL') {
       throw new Error('IMAGE_CAROUSEL generation is not implemented yet.');
     }
-    const outputKind = request.contentType;
     const campaign = await this.ctx.prisma.campaign.findUniqueOrThrow({
       where: { id: request.campaignId },
       include: { persona: true, guardrailConfig: true, sources: true },
@@ -101,9 +87,6 @@ export class GenerationService {
       orderBy: { createdAt: 'desc' },
       take: 10,
     });
-    const recentSummaries = recent.map(
-      (c) => c.hook ?? c.title ?? c.bodyText?.slice(0, 120) ?? '',
-    );
     const includePlug = this.decidePlug(campaign, recent);
 
     const learnings = await this.ctx.prisma.learningInsight.findMany({
@@ -111,48 +94,10 @@ export class GenerationService {
       orderBy: { createdAt: 'desc' },
       take: 5,
     });
-
     const memories = await this.memory.search(
       campaign.personaId,
       `${campaign.productName ?? ''} ${campaign.objective}`,
     );
-
-    const policy = buildPolicyFromCampaign(campaign);
-    const campaignPrompt: CampaignPromptInput = {
-      name: campaign.name,
-      campaignType: campaign.campaignType,
-      subject: campaign.subject,
-      objective: campaign.objective,
-      productName: campaign.productName,
-      productDescription: campaign.productDescription,
-      productUrl: campaign.productUrl,
-      targetAudience: campaign.targetAudience,
-      directnessLevel: campaign.directnessLevel,
-      plugFrequency: campaign.plugFrequency,
-      plugPercentage: campaign.plugPercentage,
-      mainMessage: campaign.mainMessage,
-      productLine: campaign.productLine,
-      sources: campaign.sources.map((s) => ({
-        type: s.type,
-        title: s.title,
-        content: s.content ?? s.url ?? '',
-      })),
-      allowedClaims: policy.allowedClaims,
-      bannedClaims: policy.bannedClaims,
-      bannedTopics: policy.bannedTopics,
-      learnings: learnings.map((l) => l.insight),
-    };
-
-    const systemPrompt = buildSystemPrompt({
-      name: campaign.persona.name,
-      backstory: campaign.persona.backstory,
-      worldview: campaign.persona.worldview,
-      speakingStyle: campaign.persona.speakingStyle,
-      tone: campaign.persona.tone,
-      humorStyle: campaign.persona.humorStyle,
-      disclosureText: campaign.persona.disclosureText,
-      memoryHighlights: memories.map((m) => ({ type: m.type, content: m.content })),
-    });
 
     const extras = [
       request.extraInstructions,
@@ -166,40 +111,53 @@ export class GenerationService {
       .filter(Boolean)
       .join('\n');
 
-    const userPrompt = buildGenerationPrompt({
-      campaign: campaignPrompt,
-      platform: { platform: request.platform, contentType: request.contentType },
-      outputKind,
-      extraInstructions: extras || undefined,
-      recentContentSummaries: recentSummaries,
-      includePlug,
-    });
-
-    const { fields, plugType, riskNotes, sourceCitations, metadata, usage } = await this.callModel(
-      request.contentType,
-      systemPrompt,
-      userPrompt,
-    );
-
-    const guardrails = runGuardrails(policy, {
+    const generated = await this.ctx.pipeline.generate({
+      outputKind: request.contentType,
       platform: request.platform,
-      texts: [
-        { label: 'title', value: fields.title ?? '' },
-        { label: 'hook', value: fields.hook ?? '' },
-        { label: 'script', value: fields.script ?? '' },
-        { label: 'caption', value: fields.caption ?? '' },
-        { label: 'body', value: fields.bodyText ?? '' },
-        { label: 'cta', value: fields.cta ?? '' },
-      ].filter((t) => t.value),
-      hashtags: fields.hashtags,
-      campaignPlugType: plugType,
-      riskNotes,
-      sourceCitations,
+      contentType: request.contentType,
+      persona: {
+        name: campaign.persona.name,
+        backstory: campaign.persona.backstory,
+        worldview: campaign.persona.worldview,
+        speakingStyle: campaign.persona.speakingStyle,
+        tone: campaign.persona.tone,
+        humorStyle: campaign.persona.humorStyle,
+        disclosureText: campaign.persona.disclosureText,
+        memoryHighlights: memories.map((m) => ({ type: m.type, content: m.content })),
+      },
+      campaign: {
+        name: campaign.name,
+        campaignType: campaign.campaignType,
+        subject: campaign.subject,
+        objective: campaign.objective,
+        productName: campaign.productName,
+        productDescription: campaign.productDescription,
+        productUrl: campaign.productUrl,
+        targetAudience: campaign.targetAudience,
+        directnessLevel: campaign.directnessLevel,
+        plugFrequency: campaign.plugFrequency,
+        plugPercentage: campaign.plugPercentage,
+        mainMessage: campaign.mainMessage,
+        productLine: campaign.productLine,
+        sources: campaign.sources.map((s) => ({
+          type: s.type,
+          title: s.title,
+          content: s.content ?? s.url ?? '',
+        })),
+        learnings: learnings.map((l) => l.insight),
+      },
+      policy: buildPolicyFromCampaign(campaign),
+      includePlug: includePlug ?? null,
+      extraInstructions: extras || null,
+      recentSummaries: recent.map(
+        (c) => c.hook ?? c.title ?? c.bodyText?.slice(0, 120) ?? '',
+      ),
       recentTexts: recent.map((c) =>
         [c.title, c.hook, c.script, c.bodyText].filter(Boolean).join('\n'),
       ),
     });
 
+    const { fields, plugType, guardrails, usage } = generated;
     const content = await this.ctx.prisma.generatedContent.create({
       data: {
         personaId: campaign.personaId,
@@ -207,10 +165,16 @@ export class GenerationService {
         platform: request.platform,
         contentType: request.contentType,
         status: guardrails.passed ? 'PENDING_APPROVAL' : 'NEEDS_EDIT',
-        ...fields,
-        sourceCitations,
-        generationPrompt: userPrompt,
-        generationMetadata: { ...metadata, plugType, usage: { ...usage } },
+        title: fields.title,
+        hook: fields.hook,
+        script: fields.script,
+        caption: fields.caption,
+        bodyText: fields.bodyText,
+        hashtags: fields.hashtags,
+        cta: fields.cta,
+        sourceCitations: generated.sourceCitations,
+        generationPrompt: generated.generationPrompt,
+        generationMetadata: { ...generated.metadata, plugType, usage: { ...usage } },
         riskScore: guardrails.riskScore,
         guardrailResult: JSON.parse(JSON.stringify(guardrails)),
         scheduledFor: request.scheduledFor,
@@ -219,23 +183,19 @@ export class GenerationService {
 
     if (request.contentType === 'SHORT_VIDEO') {
       // Phase-4 slot: storyboard captured now, real avatar/voice/render
-      // providers attach later (§3.1 — manual-export stubs only in v1).
+      // providers attach later.
       await this.ctx.prisma.videoAsset.create({
         data: {
           generatedContentId: content.id,
           status: 'STORYBOARD',
           provider: 'manual',
-          storyboardJson: metadata as object,
+          storyboardJson: generated.metadata as object,
         },
       });
     }
 
     await this.ctx.prisma.approval.create({
-      data: {
-        generatedContentId: content.id,
-        status: 'PENDING',
-        requestedVia: 'system',
-      },
+      data: { generatedContentId: content.id, status: 'PENDING', requestedVia: 'system' },
     });
 
     const dashboardUrl = `${this.ctx.env.DASHBOARD_BASE_URL}/approvals/${content.id}`;
@@ -258,103 +218,6 @@ export class GenerationService {
     });
 
     return { content, guardrails, usage };
-  }
-
-  private async callModel(
-    contentType: ContentType,
-    systemPrompt: string,
-    userPrompt: string,
-  ): Promise<{
-    fields: {
-      title?: string;
-      hook?: string;
-      script?: string;
-      caption?: string;
-      bodyText?: string;
-      hashtags: string[];
-      cta?: string;
-    };
-    plugType: ShortVideoPlan['campaignPlugType'];
-    riskNotes: string[];
-    sourceCitations: string[];
-    metadata: Record<string, unknown>;
-    usage: LlmUsage;
-  }> {
-    switch (contentType) {
-      case 'SHORT_VIDEO': {
-        const { data, usage } = await this.ctx.llm.generateStructured({
-          systemPrompt,
-          userPrompt,
-          schema: ShortVideoPlanSchema,
-        });
-        return {
-          fields: {
-            title: data.title,
-            hook: data.hook,
-            script: data.script,
-            caption: data.caption,
-            hashtags: data.hashtags,
-            cta: data.cta,
-          },
-          plugType: data.campaignPlugType,
-          riskNotes: data.riskNotes,
-          sourceCitations: data.sourceCitations,
-          metadata: {
-            visualDirection: data.visualDirection,
-            cameraStyle: data.cameraStyle,
-            outfitSuggestion: data.outfitSuggestion,
-            brollPlan: data.brollPlan,
-            thumbnailIdea: data.thumbnailIdea,
-            whyThisShouldWork: data.whyThisShouldWork,
-          },
-          usage,
-        };
-      }
-      case 'TEXT_POST':
-      case 'THREAD': {
-        const { data, usage } = await this.ctx.llm.generateStructured<TextPostPlan>({
-          systemPrompt,
-          userPrompt,
-          schema: TextPostPlanSchema,
-        });
-        return {
-          fields: {
-            hook: data.hook,
-            bodyText: data.body,
-            hashtags: data.hashtags,
-            cta: data.cta,
-          },
-          plugType: data.campaignPlugType,
-          riskNotes: data.riskNotes,
-          sourceCitations: data.sourceCitations,
-          metadata: { whyThisShouldWork: data.whyThisShouldWork },
-          usage,
-        };
-      }
-      case 'REPLY':
-      case 'DM_REPLY':
-      case 'WHATSAPP_MESSAGE': {
-        const { data, usage } = await this.ctx.llm.generateStructured<ReplyPlan>({
-          systemPrompt,
-          userPrompt,
-          schema: ReplyPlanSchema,
-        });
-        return {
-          fields: { bodyText: data.reply, hashtags: [] },
-          sourceCitations: [],
-          plugType: data.shouldMentionCampaign ? 'CASUAL' : 'NONE',
-          riskNotes: data.escalateToHuman
-            ? [`Escalate to human: ${data.reason}`]
-            : data.riskLevel === 'LOW'
-              ? []
-              : [`Model risk level ${data.riskLevel}: ${data.reason}`],
-          metadata: { tone: data.tone, escalateToHuman: data.escalateToHuman, reason: data.reason },
-          usage,
-        };
-      }
-      default:
-        throw new Error(`Content type ${contentType} is not supported for generation yet.`);
-    }
   }
 
   /**

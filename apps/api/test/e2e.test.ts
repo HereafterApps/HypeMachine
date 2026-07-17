@@ -4,10 +4,12 @@
  * Requires infra started via `pnpm dev:infra` and migrations applied.
  * Run with: pnpm test:integration
  */
+import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { LocalStorageAdapter } from '@hype/storage';
@@ -23,6 +25,33 @@ let ctx: AppContext;
 let app: FastifyInstance;
 let jobs: JobSystem;
 let storageDir: string;
+let pipelineProcess: ChildProcess;
+
+const PIPELINE_PORT = 8301;
+const PIPELINE_URL = `http://127.0.0.1:${PIPELINE_PORT}`;
+const PIPELINE_TOKEN = 'e2e-pipeline-token';
+
+async function startPipeline(): Promise<void> {
+  pipelineProcess = spawn(
+    'uv',
+    ['run', 'uvicorn', 'hype_pipeline.main:app', '--host', '127.0.0.1', '--port', `${PIPELINE_PORT}`],
+    {
+      cwd: fileURLToPath(new URL('../../pipeline', import.meta.url)),
+      env: { ...process.env, LLM_PROVIDER: 'stub', PIPELINE_TOKEN },
+      stdio: 'ignore',
+    },
+  );
+  for (let i = 0; i < 100; i++) {
+    try {
+      const response = await fetch(`${PIPELINE_URL}/health`);
+      if (response.ok) return;
+    } catch {
+      // not up yet
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  throw new Error('Pipeline service failed to start for e2e tests.');
+}
 
 let personaId: string;
 let campaignId: string;
@@ -42,14 +71,16 @@ async function api(
 }
 
 beforeAll(async () => {
+  await startPipeline();
   storageDir = mkdtempSync(join(tmpdir(), 'hype-e2e-'));
   const storage = new LocalStorageAdapter(storageDir);
   ctx = createContext({
     env: {
       ...((await import('../src/env.js')).loadEnv()),
       API_TOKEN,
-      LLM_PROVIDER: 'stub',
       STORAGE_DRIVER: 'local',
+      PIPELINE_URL,
+      PIPELINE_TOKEN,
     },
     storage,
     publishing: new PublishingRegistry(storage),
@@ -74,6 +105,7 @@ afterAll(async () => {
   await jobs.stop();
   await app.close();
   await ctx.prisma.$disconnect();
+  pipelineProcess?.kill('SIGTERM');
 });
 
 describe('demo scenario (§26): persona → campaign → generate → approve → publish → learn', () => {
@@ -225,9 +257,13 @@ describe('demo scenario (§26): persona → campaign → generate → approve �
 
   it('13-15. metrics ingestion produces a learning insight that feeds future generations', async () => {
     const published = await api('GET', '/published');
-    expect(published.body.length).toBeGreaterThanOrEqual(2);
+    // Scope to this suite's campaign — the dev DB may hold other posts.
+    const mine = published.body.filter(
+      (p: any) => p.generatedContent?.campaign?.name === 'e2e GuidedGenius',
+    );
+    expect(mine.length).toBeGreaterThanOrEqual(2);
 
-    const [first, second] = published.body;
+    const [first, second] = mine;
     const m1 = await api('POST', `/published/${first.id}/metrics`, {
       views: 42_300, likes: 2_500, comments: 180, shares: 60, saves: 30, clicks: 400,
     });

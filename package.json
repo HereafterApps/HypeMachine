@@ -16,6 +16,8 @@
     "db:migrate": "pnpm --filter @hype/db db:migrate",
     "db:seed": "pnpm --filter @hype/db db:seed",
     "dev:api": "pnpm --filter @hype/api dev",
+    "dev:web": "pnpm --filter @hype/web dev",
+    "dev:pipeline": "cd apps/pipeline && uv run uvicorn hype_pipeline.main:app --host 127.0.0.1 --port 8300",
     "dev:infra": "bash scripts/dev-infra.sh start",
     "dev:infra:stop": "bash scripts/dev-infra.sh stop"
   },

@@ -2,7 +2,7 @@ import type { GuardrailResult } from '@hype/core';
 import type { AppContext } from '../context.js';
 import { GenerationService } from './generation-service.js';
 import { PublishingService } from './publishing-service.js';
-import { buildPolicyFromCampaign, evaluateContentFields } from './guardrail-policy.js';
+import { buildPolicyFromCampaign } from './guardrail-policy.js';
 
 const QUICK_ACTION_INSTRUCTIONS: Record<string, string> = {
   REGENERATE: 'Produce a fresh take on the same brief.',
@@ -137,7 +137,8 @@ export class ApprovalService {
       where: { id: content.campaignId },
       include: { guardrailConfig: true },
     });
-    const guardrails = evaluateContentFields(buildPolicyFromCampaign(campaign), {
+    const guardrails = await this.ctx.pipeline.evaluate({
+      policy: buildPolicyFromCampaign(campaign),
       platform: content.platform,
       title: merged.title,
       hook: merged.hook,

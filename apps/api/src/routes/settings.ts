@@ -4,7 +4,10 @@ import type { AppContext } from '../context.js';
 export function settingsRoutes(ctx: AppContext) {
   return async function routes(app: FastifyInstance) {
     app.get('/settings/providers', async () => ({
-      llm: { provider: ctx.llm.name },
+      pipeline: await ctx.pipeline
+        .health()
+        .then((h) => ({ reachable: true, provider: h.provider, url: ctx.env.PIPELINE_URL }))
+        .catch(() => ({ reachable: false, provider: 'unknown', url: ctx.env.PIPELINE_URL })),
       storage: { driver: ctx.storage.driver },
       notifications: { channels: ctx.env.NOTIFY_CHANNELS.split(',') },
       publishing: {

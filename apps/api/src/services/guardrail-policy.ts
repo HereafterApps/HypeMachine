@@ -1,6 +1,22 @@
-import { runGuardrails, type GuardrailPolicy } from '@hype/guardrails';
-import type { CampaignPlugType, GuardrailResult } from '@hype/core';
-import type { Campaign, GeneratedContent, GuardrailConfig, Platform } from '@hype/db';
+import type { CampaignPlugType } from '@hype/core';
+import type { Campaign, GeneratedContent, GuardrailConfig } from '@hype/db';
+
+/**
+ * Policy payload sent to the pipeline service, which owns the guardrail
+ * engine (apps/pipeline/hype_pipeline/guardrails.py).
+ */
+export interface GuardrailPolicy {
+  campaignType: string;
+  allowedTopics: string[];
+  bannedTopics: string[];
+  allowedClaims: string[];
+  bannedClaims: string[];
+  requiredDisclosures: string[];
+  wordsToAvoid: string[];
+  allowCompetitorMentions: boolean;
+  competitorNames: string[];
+  directnessLevel: string;
+}
 
 export function buildPolicyFromCampaign(
   campaign: Campaign & { guardrailConfig: GuardrailConfig | null },
@@ -22,41 +38,6 @@ export function buildPolicyFromCampaign(
     competitorNames: competitorRules.names ?? [],
     directnessLevel: campaign.directnessLevel,
   };
-}
-
-export function evaluateContentFields(
-  policy: GuardrailPolicy,
-  input: {
-    platform: Platform;
-    title?: string | null;
-    hook?: string | null;
-    script?: string | null;
-    caption?: string | null;
-    bodyText?: string | null;
-    cta?: string | null;
-    hashtags: string[];
-    campaignPlugType?: CampaignPlugType;
-    riskNotes?: string[];
-    sourceCitations?: string[];
-    recentTexts?: string[];
-  },
-): GuardrailResult {
-  return runGuardrails(policy, {
-    platform: input.platform,
-    texts: [
-      { label: 'title', value: input.title ?? '' },
-      { label: 'hook', value: input.hook ?? '' },
-      { label: 'script', value: input.script ?? '' },
-      { label: 'caption', value: input.caption ?? '' },
-      { label: 'body', value: input.bodyText ?? '' },
-      { label: 'cta', value: input.cta ?? '' },
-    ].filter((t) => t.value),
-    hashtags: input.hashtags,
-    campaignPlugType: input.campaignPlugType ?? 'NONE',
-    riskNotes: input.riskNotes ?? [],
-    sourceCitations: input.sourceCitations ?? [],
-    recentTexts: input.recentTexts ?? [],
-  });
 }
 
 export function contentPlugType(content: GeneratedContent): CampaignPlugType {

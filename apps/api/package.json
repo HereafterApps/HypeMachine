@@ -11,10 +11,8 @@
     "test:integration": "vitest run test/e2e.test.ts"
   },
   "dependencies": {
-    "@hype/ai": "workspace:*",
     "@hype/core": "workspace:*",
     "@hype/db": "workspace:*",
-    "@hype/guardrails": "workspace:*",
     "@hype/notifications": "workspace:*",
     "@hype/publishing": "workspace:*",
     "@hype/storage": "workspace:*",

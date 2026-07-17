@@ -7,27 +7,44 @@ loop (§28) is fully wired:
 Persona → Campaign → Generate → Guardrails → Approve → Publish → Measure → Learn → Generate Better
 ```
 
+## Hybrid stack (build-spec §4.1, decided)
+
+The **Python pipeline service** (`apps/pipeline`, FastAPI) is the single
+source of truth for the LLM-facing stages — `plan → generate →
+guardrail-check` and the learning loop. The **TypeScript control plane**
+(`apps/api`) owns everything stateful: DB, approval workflow, publishing
+adapters, scheduling, notifications. They talk over HTTP with a shared
+bearer token (`PIPELINE_URL` / `PIPELINE_TOKEN`).
+
+```
+apps/web (React+Vite)  →  apps/api (Fastify/Prisma/BullMQ)  →  apps/pipeline (FastAPI)
+                             │                                    │
+                          Postgres/Redis                    Anthropic Claude / stub
+```
+
 ## Monorepo layout
 
 | Workspace | What it does |
 |---|---|
-| `packages/core` | Shared enums (§5), zod schemas for structured LLM output (§8), guardrail/analytics types, utilities |
-| `packages/db` | Prisma schema (every model in §5 + `JobLog` for §24/§25), client singleton, idempotent seed (Professor Steve + GuidedGenius, §13–§14) |
-| `packages/ai` | `LlmProvider` interface (§16.1), `AnthropicLlmProvider` (Claude structured outputs), `StubLlmProvider` (deterministic, keyless), prompt builders (§8.1–8.3) |
-| `packages/guardrails` | Deterministic policy engine (§7.9): banned claims/topics, competitor rules, platform limits, plug-directness, duplicate detection; produces the approval checklist (§19) |
-| `packages/storage` | S3-compatible adapter with local-disk driver for dev (§3.1); S3 driver loads the AWS SDK lazily |
-| `packages/publishing` | `PublishingProvider` interface (§16.5), working `ManualExportProvider`, typed Phase-5 slots for YouTube/X/TikTok/… with automatic manual-export fallback |
+| `apps/web` | React + Vite + TS control panel — the four §5 screens: persona list/create, campaign create (optimize-for locked for Debunk), approval queue, campaign dashboard |
+| `apps/api` | Fastify API, services (orchestration), BullMQ jobs, single-user bearer auth |
+| `apps/pipeline` | Python/FastAPI: prompt builders, Anthropic Claude structured outputs + deterministic stub provider, guardrail engine (§2 checks incl. political policy), learning-insight generation. `uv` project with pytest suite |
+| `packages/core` | Shared enums, zod content schemas (reference), guardrail/analytics types, utilities |
+| `packages/db` | Prisma schema (+ `JobLog`), client singleton, idempotent seed (Professor Steve + GuidedGenius) |
+| `packages/storage` | S3-compatible adapter with local-disk driver for dev; S3 driver loads the AWS SDK lazily |
+| `packages/publishing` | `PublishingProvider` interface, working `ManualExportProvider`, typed M3/M5 slots for YouTube/X/TikTok/… with automatic manual-export fallback |
 | `packages/notifications` | `Notifier` interface: Discord webhook, SES email (lazy dep), console fallback, fan-out composite |
-| `apps/api` | Fastify API (§17), services (§7), BullMQ jobs (§18), single-user bearer auth (§3.1) |
 
 ## Request/served flow
 
-- **Routes (§17)** are thin: zod-validate → call a service. Errors map to
+- **Routes** are thin: zod-validate → call a service. Errors map to
   400 (validation), 404 (missing), 409 (domain-rule conflicts), 500.
-- **GenerationService** (§7.3): loads persona+campaign+guardrails+sources,
+- **GenerationService**: loads persona+campaign+guardrails+sources,
   retrieves memory (importance + recency + keyword score), pulls recent
   content for duplicate avoidance, paces the product plug toward the
-  campaign's target ratio, calls the LLM with a schema, runs guardrails,
+  campaign's target ratio, then calls the **pipeline service**, which builds
+  the prompts, calls the LLM with a strict schema, runs the guardrail
+  engine, and returns content + checklist in one response. The service
   saves `GeneratedContent` (+ `VideoAsset` storyboard for videos), opens an
   `Approval`, notifies the approval channel.
 - **ApprovalService** (§7.5, §11): approve/reject/edit/regenerate.
