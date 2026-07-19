@@ -3,10 +3,12 @@ import { z } from 'zod';
 import { CONTENT_STATUSES, CONTENT_TYPES, PLATFORMS } from '@hype/core';
 import type { AppContext } from '../context.js';
 import { GenerationService } from '../services/generation-service.js';
+import { ApprovalService } from '../services/approval-service.js';
 
 export function contentRoutes(ctx: AppContext) {
   return async function routes(app: FastifyInstance) {
     const generation = new GenerationService(ctx);
+    const approvals = new ApprovalService(ctx);
 
     // --- Generation routes (§17) ---
     app.post('/generation/run/:campaignId', async (request, reply) => {
@@ -35,16 +37,28 @@ export function contentRoutes(ctx: AppContext) {
         return reply.code(400).send({ error: 'Campaign has no active schedules.' });
       }
       const results = [];
+      const errors: { platform: string; contentType: string; error: string }[] = [];
       for (const schedule of schedules) {
-        results.push(
-          await generation.generate({
-            campaignId: body.campaignId,
+        try {
+          results.push(
+            await generation.generate({
+              campaignId: body.campaignId,
+              platform: schedule.platform,
+              contentType: schedule.contentType,
+            }),
+          );
+        } catch (error) {
+          errors.push({
             platform: schedule.platform,
             contentType: schedule.contentType,
-          }),
-        );
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
       }
-      return reply.code(201).send(results);
+      if (results.length === 0 && errors.length > 0) {
+        return reply.code(502).send({ error: 'All generations failed.', failures: errors });
+      }
+      return reply.code(201).send(errors.length ? { results, failures: errors } : results);
     });
 
     // --- Content queue (§6.8) ---
@@ -82,11 +96,13 @@ export function contentRoutes(ctx: AppContext) {
           campaign: true,
           videoAsset: true,
           approvals: { orderBy: { createdAt: 'desc' } },
-          publishedPosts: true,
+          publishedPost: true,
         },
       });
     });
 
+    // Content edits route through the approval workflow so guardrails re-run
+    // and the pending approval resets — no back door around the §2 checks.
     app.patch('/content/:id', async (request) => {
       const { id } = request.params as { id: string };
       const body = z
@@ -98,10 +114,11 @@ export function contentRoutes(ctx: AppContext) {
           bodyText: z.string().optional(),
           hashtags: z.array(z.string()).optional(),
           cta: z.string().optional(),
+          sourceCitations: z.array(z.string()).optional(),
           scheduledFor: z.coerce.date().nullable().optional(),
         })
         .parse(request.body);
-      return ctx.prisma.generatedContent.update({ where: { id }, data: body });
+      return approvals.edit(id, body);
     });
 
     app.delete('/content/:id', async (request) => {

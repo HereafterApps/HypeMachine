@@ -425,11 +425,11 @@ model GeneratedContent {
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
-  persona        Persona         @relation(fields: [personaId], references: [id], onDelete: Cascade)
-  campaign       Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  videoAsset     VideoAsset?
-  approvals      Approval[]
-  publishedPosts PublishedPost[]
+  persona       Persona        @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  campaign      Campaign       @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  videoAsset    VideoAsset?
+  approvals     Approval[]
+  publishedPost PublishedPost?
 
   @@index([status, scheduledFor])
   @@index([campaignId, status])
@@ -477,7 +477,8 @@ model Approval {
 
 model PublishedPost {
   id                 String              @id @default(cuid())
-  generatedContentId String
+  // One live post per content item — prevents double-publishing at the DB.
+  generatedContentId String              @unique
   platform           Platform
   platformPostId     String
   platformUrl        String?

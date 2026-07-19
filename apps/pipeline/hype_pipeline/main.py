@@ -35,7 +35,13 @@ def _load_dotenv() -> None:
 
 _load_dotenv()
 
-from .guardrails import run_guardrails
+if os.environ.get("PIPELINE_TOKEN", "dev-pipeline-token") == "dev-pipeline-token":
+    print(
+        "WARNING: PIPELINE_TOKEN is unset or the well-known dev default - "
+        "set a strong token before exposing this service beyond localhost."
+    )
+
+from .guardrails import run_guardrails  # noqa: E402
 from .prompts import (
     OUTPUT_KIND_MARKER,
     build_campaign_context,
@@ -100,6 +106,8 @@ def generate(request: GenerateRequest) -> GenerateResponse:
         raise HTTPException(
             status_code=422 if not error.retryable else 503, detail=str(error)
         ) from error
+    except Exception as error:  # SDK/auth/rate-limit/parse errors: retryable to the caller
+        raise HTTPException(status_code=503, detail=f"LLM provider error: {error}") from error
 
     guardrails = run_guardrails(
         request.policy,
@@ -117,6 +125,7 @@ def generate(request: GenerateRequest) -> GenerateResponse:
         risk_notes=risk_notes,
         source_citations=citations,
         recent_texts=request.recentTexts,
+        content_kind=request.contentType,
     )
 
     return GenerateResponse(
@@ -203,6 +212,7 @@ def evaluate(request: EvaluateRequest) -> GuardrailResult:
         risk_notes=request.riskNotes,
         source_citations=request.sourceCitations,
         recent_texts=request.recentTexts,
+        content_kind=request.contentType,
     )
 
 
@@ -237,4 +247,6 @@ def insights(request: InsightsRequest) -> InsightsResponse:
         raise HTTPException(
             status_code=422 if not error.retryable else 503, detail=str(error)
         ) from error
+    except Exception as error:
+        raise HTTPException(status_code=503, detail=f"LLM provider error: {error}") from error
     return InsightsResponse(insight=plan, usage=usage)

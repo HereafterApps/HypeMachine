@@ -35,6 +35,21 @@ const DEFAULT_JOB_OPTS: JobsOptions = {
 /** Max unreviewed items per campaign before generation pauses (§10). */
 const APPROVAL_BACKLOG_LIMIT = 20;
 
+/** Wall-clock hour in an IANA timezone (falls back to UTC on bad tz). */
+function hourInTimezone(date: Date, timezone: string): number {
+  try {
+    return Number(
+      new Intl.DateTimeFormat('en-GB', {
+        hour: '2-digit',
+        hour12: false,
+        timeZone: timezone,
+      }).format(date),
+    );
+  } catch {
+    return date.getUTCHours();
+  }
+}
+
 export class JobSystem {
   private readonly connection: Redis;
   readonly queues: Record<keyof typeof QUEUE_NAMES, Queue>;
@@ -124,31 +139,59 @@ export class JobSystem {
       where: {
         isActive: true,
         nextRunAt: { lte: now },
-        campaign: { status: 'ACTIVE', persona: { status: 'ACTIVE' } },
+        campaign: {
+          status: 'ACTIVE',
+          persona: { status: 'ACTIVE' },
+          // Campaigns stop generating past their end date (disposable missions).
+          OR: [{ endDate: null }, { endDate: { gte: now } }],
+        },
       },
       include: { campaign: true },
     });
 
     let generated = 0;
+    const backlogByCampaign = new Map<string, number>();
     for (const schedule of dueSchedules) {
-      const skip = await this.shouldSkip(schedule, now);
-      const nextRunAt = this.computeNextRun(schedule, now);
-      await this.ctx.prisma.contentSchedule.update({
-        where: { id: schedule.id },
-        data: { nextRunAt },
-      });
-      if (skip) continue;
-      await this.queues.generate.add('generate', {
-        campaignId: schedule.campaignId,
-        platform: schedule.platform,
-        contentType: schedule.contentType,
-        scheduleId: schedule.id,
-      } satisfies GenerateJobData);
-      generated++;
+      // One broken row (bad cron/timezone) must never brick the whole tick:
+      // deactivate it, log, and keep going.
+      try {
+        const skip = await this.shouldSkip(schedule, now, backlogByCampaign);
+        const nextRunAt = this.computeNextRun(schedule, now);
+        await this.ctx.prisma.contentSchedule.update({
+          where: { id: schedule.id },
+          data: { nextRunAt },
+        });
+        if (skip) continue;
+        await this.queues.generate.add('generate', {
+          campaignId: schedule.campaignId,
+          platform: schedule.platform,
+          contentType: schedule.contentType,
+          scheduleId: schedule.id,
+        } satisfies GenerateJobData);
+        generated++;
+      } catch (error) {
+        await this.ctx.prisma.contentSchedule.update({
+          where: { id: schedule.id },
+          data: { isActive: false },
+        });
+        await this.ctx.prisma.jobLog.create({
+          data: {
+            jobName: 'GenerateScheduledContentJob',
+            campaignId: schedule.campaignId,
+            status: 'FAILED',
+            error: `Schedule ${schedule.id} deactivated: ${error instanceof Error ? error.message : error}`,
+          },
+        });
+      }
     }
 
     const dueContent = await this.ctx.prisma.generatedContent.findMany({
-      where: { status: 'SCHEDULED', scheduledFor: { lte: now } },
+      where: {
+        status: 'SCHEDULED',
+        scheduledFor: { lte: now },
+        // Pausing a campaign or persona pauses its scheduled publishes too.
+        campaign: { status: 'ACTIVE', persona: { status: 'ACTIVE' } },
+      },
       select: { id: true },
     });
     for (const content of dueContent) {
@@ -169,14 +212,16 @@ export class JobSystem {
       maxDailyCount: number | null;
       quietHoursStart: number | null;
       quietHoursEnd: number | null;
+      timezone: string;
       platform: Platform;
       contentType: ContentType;
     },
     now: Date,
+    backlogByCampaign: Map<string, number>,
   ): Promise<boolean> {
-    // Quiet hours (§10).
+    // Quiet hours (§10) — evaluated in the schedule's own timezone.
     if (schedule.quietHoursStart != null && schedule.quietHoursEnd != null) {
-      const hour = now.getUTCHours();
+      const hour = hourInTimezone(now, schedule.timezone);
       const inQuiet =
         schedule.quietHoursStart <= schedule.quietHoursEnd
           ? hour >= schedule.quietHoursStart && hour < schedule.quietHoursEnd
@@ -197,10 +242,14 @@ export class JobSystem {
       });
       if (todayCount >= schedule.maxDailyCount) return true;
     }
-    // Approval backlog limit (§10).
-    const backlog = await this.ctx.prisma.generatedContent.count({
-      where: { campaignId: schedule.campaignId, status: 'PENDING_APPROVAL' },
-    });
+    // Approval backlog limit (§10) — counted once per campaign per tick.
+    let backlog = backlogByCampaign.get(schedule.campaignId);
+    if (backlog == null) {
+      backlog = await this.ctx.prisma.generatedContent.count({
+        where: { campaignId: schedule.campaignId, status: 'PENDING_APPROVAL' },
+      });
+      backlogByCampaign.set(schedule.campaignId, backlog);
+    }
     return backlog >= APPROVAL_BACKLOG_LIMIT;
   }
 

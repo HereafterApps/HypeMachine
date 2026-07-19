@@ -37,6 +37,7 @@ export class AnalyticsService {
         where: { status: 'LIVE' },
       });
       let fetched = 0;
+      let failed = 0;
       for (const post of posts) {
         const provider = this.ctx.publishing.get(post.platform);
         if (!provider) continue;
@@ -46,10 +47,12 @@ export class AnalyticsService {
           fetched++;
         } catch (error) {
           if (error instanceof MetricsUnavailableError) continue; // manual platforms
-          throw error;
+          // One flaky post must not abort ingestion for every other post.
+          failed++;
+          console.error(`Metrics fetch failed for post ${post.id}:`, error);
         }
       }
-      return { fetched, scanned: posts.length };
+      return { fetched, failed, scanned: posts.length };
     });
   }
 

@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 import { Prisma } from '@hype/db';
@@ -14,11 +15,14 @@ export async function buildServer(ctx: AppContext): Promise<FastifyInstance> {
 
   app.get('/health', async () => ({ ok: true }));
 
-  // Single-user auth (v1, §3.1): static bearer token.
+  // Single-user auth (v1): static bearer token, compared in constant time.
+  const expectedAuth = createHash('sha256').update(`Bearer ${ctx.env.API_TOKEN}`).digest();
   app.addHook('onRequest', async (request, reply) => {
     if (request.url === '/health') return;
-    const header = request.headers.authorization;
-    if (header !== `Bearer ${ctx.env.API_TOKEN}`) {
+    const provided = createHash('sha256')
+      .update(request.headers.authorization ?? '')
+      .digest();
+    if (!timingSafeEqual(provided, expectedAuth)) {
       return reply.code(401).send({ error: 'Unauthorized' });
     }
   });
@@ -36,7 +40,7 @@ export async function buildServer(ctx: AppContext): Promise<FastifyInstance> {
     const message = error instanceof Error ? error.message : 'Internal error';
     // Domain-rule violations from services read as 409s, not 500s.
     const conflict =
-      /cannot be approved|only PENDING_APPROVAL|cannot reject|cannot edit|is (PAUSED|ARCHIVED)|guardrail blockers|Coordination guardrail|requires claimToDebunk|cannot optimize for/i.test(
+      /cannot be approved|only PENDING_APPROVAL|cannot reject|cannot edit|cannot regenerate|is (PAUSED|ARCHIVED)|guardrail blockers|Coordination guardrail|requires claimToDebunk|cannot optimize for/i.test(
         message,
       );
     app.log.error(error);

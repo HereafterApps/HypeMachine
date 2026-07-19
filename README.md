@@ -68,8 +68,9 @@ Runs fully offline with `LLM_PROVIDER=stub`; set `LLM_PROVIDER=anthropic` +
 `ANTHROPIC_API_KEY` for real generation.
 
 ```bash
-pnpm test              # unit tests
-pnpm test:integration  # full demo scenario (§26) against live infra
+pnpm test                           # TS unit tests
+(cd apps/pipeline && uv run pytest) # pipeline service tests
+pnpm test:integration               # full demo-scenario e2e against live infra
 ```
 
 ## Scope & ethics baseline (non-negotiable, see build-spec §2)

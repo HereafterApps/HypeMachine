@@ -14,7 +14,14 @@ export class PublishingService {
           where: { id: contentId },
           include: { persona: true, campaign: true, videoAsset: true },
         });
-        if (!['APPROVED', 'SCHEDULED'].includes(content.status)) {
+        // Atomic claim: concurrent publish attempts (route vs scheduler, or
+        // BullMQ retries) cannot double-post. FAILED is claimable so a
+        // transient provider error can be retried.
+        const claimed = await this.ctx.prisma.generatedContent.updateMany({
+          where: { id: contentId, status: { in: ['APPROVED', 'SCHEDULED', 'FAILED'] } },
+          data: { status: 'PUBLISHING' },
+        });
+        if (claimed.count === 0) {
           throw new Error(
             `Content ${contentId} is ${content.status}; only APPROVED/SCHEDULED content can publish.`,
           );
@@ -46,36 +53,13 @@ export class PublishingService {
         };
 
         const provider = this.ctx.publishing.resolve(content.platform, input);
-        await this.ctx.prisma.generatedContent.update({
-          where: { id: content.id },
-          data: { status: 'PUBLISHING' },
-        });
 
+        let result;
         try {
-          const result = await provider.publish(input);
-          const published = await this.ctx.prisma.publishedPost.create({
-            data: {
-              generatedContentId: content.id,
-              platform: provider.platform,
-              platformPostId: result.platformPostId,
-              platformUrl: result.platformUrl,
-              rawResponse: JSON.parse(JSON.stringify(result.rawResponse ?? null)),
-            },
-          });
-          await this.ctx.prisma.generatedContent.update({
-            where: { id: content.id },
-            data: { status: 'PUBLISHED' },
-          });
-          await this.ctx.notifier.notify({
-            kind: 'PUBLISH_SUCCEEDED',
-            title: `Published: ${content.persona.name} / ${content.campaign.name}`,
-            body:
-              provider.platform === 'MANUAL_EXPORT'
-                ? `Export bundle ready for manual upload: ${result.platformUrl ?? result.platformPostId}`
-                : `Live at ${result.platformUrl ?? result.platformPostId}`,
-          });
-          return { published, provider: provider.platform };
+          result = await provider.publish(input);
         } catch (error) {
+          // Provider failure: the post is NOT live — FAILED is accurate and
+          // retryable (via the claim above).
           await this.ctx.prisma.generatedContent.update({
             where: { id: content.id },
             data: { status: 'FAILED' },
@@ -87,6 +71,34 @@ export class PublishingService {
           });
           throw error;
         }
+
+        // Past this point the post IS live: never mark FAILED. If a DB write
+        // below fails, the row stays PUBLISHING for reconciliation instead of
+        // inviting a duplicate publish.
+        const published = await this.ctx.prisma.publishedPost.upsert({
+          where: { generatedContentId: content.id },
+          update: {},
+          create: {
+            generatedContentId: content.id,
+            platform: provider.platform,
+            platformPostId: result.platformPostId,
+            platformUrl: result.platformUrl,
+            rawResponse: JSON.parse(JSON.stringify(result.rawResponse ?? null)),
+          },
+        });
+        await this.ctx.prisma.generatedContent.update({
+          where: { id: content.id },
+          data: { status: 'PUBLISHED' },
+        });
+        await this.ctx.notifier.notify({
+          kind: 'PUBLISH_SUCCEEDED',
+          title: `Published: ${content.persona.name} / ${content.campaign.name}`,
+          body:
+            provider.platform === 'MANUAL_EXPORT'
+              ? `Export bundle ready for manual upload: ${result.platformUrl ?? result.platformPostId}`
+              : `Live at ${result.platformUrl ?? result.platformPostId}`,
+        });
+        return { published, provider: provider.platform };
       },
     );
   }

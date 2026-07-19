@@ -1,4 +1,4 @@
-"""Deterministic guardrail engine — port of packages/guardrails.
+"""Deterministic guardrail engine.
 
 Single source of truth since the hybrid split (build-spec §4.1): the TS API
 calls this service for every check. Blocker/warning wording is part of the
@@ -43,12 +43,17 @@ ADVOCACY_PATTERNS = [
 ]
 
 
+REPLY_KINDS = {"REPLY", "DM_REPLY", "WHATSAPP_MESSAGE"}
+
+
 def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text.lower()).strip()
 
 
-def _contains_phrase(haystack: str, phrase: str) -> bool:
-    return _normalize(phrase) in _normalize(haystack)
+def _contains_phrase(norm_haystack: str, phrase: str) -> bool:
+    norm_phrase = _normalize(phrase)
+    # An empty policy entry must never match everything.
+    return bool(norm_phrase) and norm_phrase in norm_haystack
 
 
 def text_similarity(a: str, b: str) -> float:
@@ -83,6 +88,7 @@ def run_guardrails(
     risk_notes: list[str],
     source_citations: list[str],
     recent_texts: list[str],
+    content_kind: str = "",
 ) -> GuardrailResult:
     warnings: list[str] = []
     blockers: list[str] = []
@@ -91,12 +97,15 @@ def run_guardrails(
     risk_score = 0
 
     texts = [(label, value) for label, value in texts if value]
-    all_text = "\n".join(value for _, value in texts)
+    # Hashtags are audience-visible text too — they must not dodge the scans.
+    all_text = "\n".join([*(value for _, value in texts), " ".join(hashtags)]).strip()
+    norm_text = _normalize(all_text)
     is_political_mission = policy.campaignType in POLITICAL_MISSION_TYPES
+    is_reply = content_kind in REPLY_KINDS
 
     # 0a. Political-content policy (build-spec §2.6).
     if is_political_mission:
-        advocacy_hits = [p for p in ADVOCACY_PATTERNS if p.pattern.search(all_text)]
+        advocacy_hits = [p for p in ADVOCACY_PATTERNS if p.pattern.search(all_text)]  # noqa: E501 — scans hashtags too via all_text
         if advocacy_hits:
             labels = ", ".join(h.label for h in advocacy_hits)
             blockers.append(
@@ -120,9 +129,12 @@ def run_guardrails(
             "correction itself is factually accurate."
         )
 
-    # 0b. DEBUNK requires a citable primary source.
-    if policy.campaignType == "DEBUNK":
-        has_citations = len(source_citations) > 0
+    # 0b. DEBUNK primary content requires a citable primary source. Replies
+    # on the persona's own debunk posts cannot carry citations and are
+    # exempt (they still go through the advocacy scan and human approval).
+    if policy.campaignType == "DEBUNK" and not is_reply:
+        valid_citations = [c for c in source_citations if len(c.strip()) >= 8]
+        has_citations = len(valid_citations) > 0
         if not has_citations:
             blockers.append("DEBUNK content requires at least one citable primary source.")
             required_edits.append("Add the primary source(s) that verify the correction.")
@@ -131,12 +143,12 @@ def run_guardrails(
             ChecklistItem(
                 label="Primary source cited (DEBUNK)",
                 passed=has_citations,
-                detail="; ".join(source_citations) or None,
+                detail="; ".join(valid_citations) or None,
             )
         )
 
     # 1. Banned claims — blocker.
-    banned_claim_hits = [c for c in policy.bannedClaims if _contains_phrase(all_text, c)]
+    banned_claim_hits = [c for c in policy.bannedClaims if _contains_phrase(norm_text, c)]
     if banned_claim_hits:
         blockers.append(f"Contains banned claim(s): {'; '.join(banned_claim_hits)}")
         required_edits.append("Remove or rephrase the banned claims.")
@@ -150,7 +162,7 @@ def run_guardrails(
     )
 
     # 2. Banned topics — blocker.
-    banned_topic_hits = [t for t in policy.bannedTopics if _contains_phrase(all_text, t)]
+    banned_topic_hits = [t for t in policy.bannedTopics if _contains_phrase(norm_text, t)]
     if banned_topic_hits:
         blockers.append(f"Touches banned topic(s): {'; '.join(banned_topic_hits)}")
         required_edits.append("Drop the banned topics.")
@@ -164,7 +176,7 @@ def run_guardrails(
     )
 
     # 3. Words/phrases to avoid — warning.
-    avoid_hits = [w for w in policy.wordsToAvoid if _contains_phrase(all_text, w)]
+    avoid_hits = [w for w in policy.wordsToAvoid if _contains_phrase(norm_text, w)]
     if avoid_hits:
         warnings.append(f"Uses discouraged wording: {', '.join(avoid_hits)}")
         risk_score += 10
@@ -177,7 +189,7 @@ def run_guardrails(
     )
 
     # 4. Competitor mentions — blocker unless allowed.
-    competitor_hits = [c for c in policy.competitorNames if _contains_phrase(all_text, c)]
+    competitor_hits = [c for c in policy.competitorNames if _contains_phrase(norm_text, c)]
     if competitor_hits and not policy.allowCompetitorMentions:
         blockers.append(f"Mentions competitor(s): {', '.join(competitor_hits)}")
         required_edits.append("Remove competitor mentions.")
@@ -229,7 +241,9 @@ def run_guardrails(
     # 8. Model-flagged risk notes — warning.
     if risk_notes:
         warnings.append(f"Model flagged: {'; '.join(risk_notes)}")
-        risk_score += min(15, len(risk_notes) * 5)
+        escalation = any(n.lower().startswith("escalate to human") for n in risk_notes)
+        # An explicit escalate-to-human flag must not present as LOW risk.
+        risk_score += 30 if escalation else min(15, len(risk_notes) * 5)
     checklist.append(
         ChecklistItem(
             label="No model-flagged risks",

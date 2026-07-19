@@ -30,14 +30,16 @@ function ApprovalCard({ item, onChanged }: { item: ContentItem; onChanged: () =>
   const [showChecklist, setShowChecklist] = useState(false);
   const guardrails = item.guardrailResult ?? null;
 
-  const act = async (fn: () => Promise<unknown>) => {
+  const act = async (fn: () => Promise<unknown>): Promise<boolean> => {
     setBusy(true);
     setError(null);
     try {
       await fn();
       onChanged();
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -115,7 +117,10 @@ function ApprovalCard({ item, onChanged }: { item: ContentItem; onChanged: () =>
           item={item}
           busy={busy}
           onCancel={() => setEditing(false)}
-          onSave={(edits) => act(() => api.post(`/approvals/${item.id}/edit`, edits))}
+          onSave={async (edits) => {
+            const saved = await act(() => api.post(`/approvals/${item.id}/edit`, edits));
+            if (saved) setEditing(false);
+          }}
         />
       ) : (
         <div className="row" style={{ marginTop: 12 }}>
@@ -163,13 +168,16 @@ function EditForm({
 }: {
   item: ContentItem;
   busy: boolean;
-  onSave: (edits: Record<string, unknown>) => void;
+  onSave: (edits: Record<string, unknown>) => void | Promise<void>;
   onCancel: () => void;
 }) {
+  // Edit whichever text field this content actually carries.
+  const bodyField =
+    item.bodyText != null ? 'bodyText' : item.script != null ? 'script' : 'caption';
+  const bodyLabel = { bodyText: 'Body', script: 'Script', caption: 'Caption' }[bodyField];
   const [hook, setHook] = useState(item.hook ?? '');
-  const [body, setBody] = useState(item.bodyText ?? item.script ?? '');
+  const [body, setBody] = useState(item[bodyField] ?? '');
   const [citations, setCitations] = useState(item.sourceCitations.join('\n'));
-  const isScript = item.bodyText == null && item.script != null;
 
   return (
     <div className="stack" style={{ marginTop: 12 }}>
@@ -178,7 +186,7 @@ function EditForm({
         <input value={hook} onChange={(e) => setHook(e.target.value)} />
       </label>
       <label className="field">
-        {isScript ? 'Script' : 'Body'}
+        {bodyLabel}
         <textarea value={body} onChange={(e) => setBody(e.target.value)} />
       </label>
       <label className="field">
@@ -190,8 +198,9 @@ function EditForm({
           disabled={busy}
           onClick={() =>
             onSave({
-              hook,
-              ...(isScript ? { script: body } : { bodyText: body }),
+              // Never clobber a field that was never set on this item.
+              ...(item.hook != null || hook ? { hook } : {}),
+              [bodyField]: body,
               sourceCitations: citations.split('\n').map((c) => c.trim()).filter(Boolean),
             })
           }

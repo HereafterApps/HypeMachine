@@ -221,10 +221,13 @@ describe('demo scenario (§26): persona → campaign → generate → approve �
 
   it('8-12. approval queue works; approving publishes via manual export', async () => {
     const queue = await api('GET', '/approvals');
-    expect(queue.body.length).toBeGreaterThanOrEqual(2);
+    // The shared dev DB may hold pending items from other campaigns
+    // (e.g. seeded-campaign scheduler output) — scope to this suite's.
+    const ours = queue.body.filter((c: any) => c.campaign?.name === 'e2e GuidedGenius');
+    expect(ours.length).toBeGreaterThanOrEqual(2);
 
-    const textItem = queue.body.find((c: any) => c.contentType === 'TEXT_POST');
-    const videoItem = queue.body.find((c: any) => c.contentType === 'SHORT_VIDEO');
+    const textItem = ours.find((c: any) => c.contentType === 'TEXT_POST');
+    const videoItem = ours.find((c: any) => c.contentType === 'SHORT_VIDEO');
 
     const approved = await api('POST', `/approvals/${textItem.id}/approve`, {});
     expect(approved.status).toBe(200);

@@ -134,6 +134,8 @@ export class PipelineClient {
           authorization: `Bearer ${this.token}`,
         },
         body: JSON.stringify(body),
+        // A hung pipeline must not pin API requests/workers indefinitely.
+        signal: AbortSignal.timeout(240_000),
       });
     } catch (error) {
       throw new PipelineError(
@@ -163,7 +165,9 @@ export class PipelineClient {
   }
 
   async health(): Promise<{ ok: boolean; provider: string }> {
-    const response = await fetch(`${this.baseUrl}/health`);
+    const response = await fetch(`${this.baseUrl}/health`, {
+      signal: AbortSignal.timeout(5_000),
+    });
     if (!response.ok) throw new PipelineError(`Pipeline health check failed`, response.status);
     return (await response.json()) as { ok: boolean; provider: string };
   }

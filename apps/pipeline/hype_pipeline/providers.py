@@ -46,7 +46,8 @@ class AnthropicProvider:
     def __init__(self, model: str | None = None):
         from anthropic import Anthropic
 
-        self._client = Anthropic()
+        # 3-minute cap: a hung generation must not pin a worker for the SDK's 10-minute default.
+        self._client = Anthropic(timeout=180.0)
         self._model = model or os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-8")
 
     def generate_structured(

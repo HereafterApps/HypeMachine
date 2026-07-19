@@ -29,6 +29,7 @@ export function publishingRoutes(ctx: AppContext) {
           snapshots: { orderBy: { capturedAt: 'desc' }, take: 1 },
         },
         orderBy: { publishedAt: 'desc' },
+        take: 200,
       }),
     );
 

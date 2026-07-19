@@ -3,7 +3,18 @@
  * §14 (GuidedGenius campaign) and §20 (ethics config). Idempotent —
  * re-running updates in place.
  */
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { config as dotenv } from 'dotenv';
 import { getPrisma, disconnectPrisma, type Campaign, type Persona, type User } from './index.js';
+
+// Standalone runs (pnpm db:seed) need the root .env; existing env wins.
+for (const candidate of [resolve('.env'), resolve('../../.env')]) {
+  if (existsSync(candidate)) {
+    dotenv({ path: candidate });
+    break;
+  }
+}
 
 export async function seed(): Promise<{ owner: User; steve: Persona; campaign: Campaign }> {
   const prisma = getPrisma();

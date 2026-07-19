@@ -4,6 +4,15 @@
 > This spec supersedes conflicting parts of `product-plan.md`. Where the two
 > disagree (campaign types, political policy, learning-loop constraints,
 > stack recommendation), this document wins.
+>
+> **Implementation status:** M1, M2, and M4 are built and tested (plus the
+> control panel and Discord notifications from M3). M3's real YouTube/X
+> auto-publish adapters are still slots — everything currently publishes via
+> MANUAL_EXPORT. §7.3 stack is resolved: hybrid (TS control plane + Python
+> pipeline + React/Vite web). §7.1 uses the conservative default: a human
+> picks every debunk claim; options (b)/(c) remain open. Entity names in the
+> code follow product-plan §5 (GeneratedContent/Approval/PublishedPost/
+> AnalyticsSnapshot ≈ ContentItem/ApprovalItem/Publication/Metric in §4.3).
 
 ---
 

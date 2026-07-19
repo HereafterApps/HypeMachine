@@ -1,4 +1,4 @@
-"""Prompt builders — port of the original packages/ai builders.
+"""Prompt builders.
 
 The pipeline service is now the single source of truth for these; keep
 wording stable because the operator-facing prompt is stored on each

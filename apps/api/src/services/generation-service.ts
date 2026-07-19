@@ -83,7 +83,12 @@ export class GenerationService {
     await this.assertNoCrossPersonaCoordination(campaign);
 
     const recent = await this.ctx.prisma.generatedContent.findMany({
-      where: { campaignId: campaign.id, contentType: request.contentType },
+      where: {
+        campaignId: campaign.id,
+        contentType: request.contentType,
+        // Rejected/archived churn must not skew plug pacing or dedupe context.
+        status: { notIn: ['REJECTED', 'ARCHIVED', 'FAILED'] },
+      },
       orderBy: { createdAt: 'desc' },
       take: 10,
     });

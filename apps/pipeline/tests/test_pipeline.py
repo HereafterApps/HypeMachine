@@ -146,6 +146,80 @@ def test_insights_mission_constraint_in_prompt():
     assert 0 <= response.json()["insight"]["confidence"] <= 1
 
 
+def test_debunk_replies_exempt_from_citation_rule_but_not_advocacy():
+    policy = {**POLICY, "campaignType": "DEBUNK"}
+    # A reply without citations must be approvable…
+    result = client.post(
+        "/evaluate",
+        json={
+            "policy": policy,
+            "platform": "X",
+            "contentType": "REPLY",
+            "bodyText": "Thanks — the full recording is linked in the original post.",
+            "hashtags": [],
+        },
+        headers=AUTH,
+    ).json()
+    assert not any("primary source" in b for b in result["blockers"])
+    # …but advocacy in a reply is still blocked.
+    result = client.post(
+        "/evaluate",
+        json={
+            "policy": policy,
+            "platform": "X",
+            "contentType": "REPLY",
+            "bodyText": "Exactly, which is why you should oppose the measure.",
+            "hashtags": [],
+        },
+        headers=AUTH,
+    ).json()
+    assert result["passed"] is False
+
+
+def test_hashtags_are_scanned_and_junk_citations_rejected():
+    result = client.post(
+        "/evaluate",
+        json={
+            "policy": POLICY,
+            "platform": "X",
+            "bodyText": "Great study session today.",
+            "hashtags": ["#TutorBot"],
+        },
+        headers=AUTH,
+    ).json()
+    assert any("competitor" in b.lower() for b in result["blockers"])
+
+    result = client.post(
+        "/evaluate",
+        json={
+            "policy": {**POLICY, "campaignType": "DEBUNK"},
+            "platform": "X",
+            "contentType": "TEXT_POST",
+            "bodyText": "That claim is false.",
+            "hashtags": [],
+            "sourceCitations": ["", "n/a"],
+        },
+        headers=AUTH,
+    ).json()
+    assert any("primary source" in b for b in result["blockers"])
+
+
+def test_escalation_flag_raises_risk_above_low():
+    result = client.post(
+        "/evaluate",
+        json={
+            "policy": POLICY,
+            "platform": "X",
+            "contentType": "REPLY",
+            "bodyText": "Let me get back to you on that legal question.",
+            "hashtags": [],
+            "riskNotes": ["Escalate to human: legal question from audience"],
+        },
+        headers=AUTH,
+    ).json()
+    assert result["riskLevel"] != "LOW"
+
+
 def test_guardrails_engine_direct():
     policy = GuardrailPolicy(**{**POLICY, "campaignType": "PRODUCT_HYPE"})
     result = run_guardrails(

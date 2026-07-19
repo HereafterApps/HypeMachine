@@ -27,9 +27,18 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
   const text = await response.text();
-  const data = text ? JSON.parse(text) : null;
+  let data: any = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    // Non-JSON body (proxy error page etc.) — fall through to status message.
+  }
   if (!response.ok) {
-    throw new ApiError(data?.error ?? `${response.status} ${response.statusText}`, response.status);
+    const detail =
+      data?.issues?.length
+        ? `${data.error}: ${data.issues.map((i: any) => `${i.path?.join('.')} ${i.message}`).join('; ')}`
+        : data?.error;
+    throw new ApiError(detail ?? `${response.status} ${response.statusText}`, response.status);
   }
   return data as T;
 }

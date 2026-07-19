@@ -46,10 +46,15 @@ export function NewCampaignPage() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (form.campaignType !== 'DEBUNK' && !platforms.youtube && !platforms.x) {
+      setError('Pick at least one platform (or use a Debunk campaign, which generates per human-picked claim).');
+      return;
+    }
     setBusy(true);
     setError(null);
+    let campaign: Campaign | null = null;
     try {
-      const campaign = await api.post<Campaign>('/campaigns', {
+      campaign = await api.post<Campaign>('/campaigns', {
         personaId: form.personaId,
         name: form.name,
         campaignType: form.campaignType,
@@ -81,6 +86,15 @@ export function NewCampaignPage() {
       }
       navigate(`/campaigns/${campaign.id}`);
     } catch (err) {
+      if (campaign) {
+        // Campaign exists; only a schedule call failed. Navigate anyway so a
+        // resubmit can't create a duplicate campaign.
+        alert(
+          `Campaign created, but adding a schedule failed: ${err instanceof Error ? err.message : err}`,
+        );
+        navigate(`/campaigns/${campaign.id}`);
+        return;
+      }
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);

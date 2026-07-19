@@ -197,6 +197,7 @@ class GenerateResponse(BaseModel):
 class EvaluateRequest(BaseModel):
     policy: GuardrailPolicy
     platform: str
+    contentType: str = ""
     title: Optional[str] = None
     hook: Optional[str] = None
     script: Optional[str] = None

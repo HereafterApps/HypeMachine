@@ -57,6 +57,7 @@ export function CampaignDashboardPage() {
         await api.post('/generation/run', { campaignId: campaign.id });
       }
       setOk('Generated — see the Approval Queue.');
+      setClaim('');
       reloadAll();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -192,14 +193,20 @@ function PublishedRow({ post, onSaved }: { post: PublishedPost; onSaved: () => v
   const [showForm, setShowForm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [metrics, setMetrics] = useState({ views: 0, likes: 0, comments: 0, shares: 0, clicks: 0 });
+  const [metrics, setMetrics] = useState({
+    views: 0, likes: 0, comments: 0, shares: 0, saves: 0, clicks: 0,
+  });
+  const [missionMetric, setMissionMetric] = useState('');
   const snapshot = post.snapshots?.[0];
 
   const save = async () => {
     setBusy(true);
     setError(null);
     try {
-      await api.post(`/published/${post.id}/metrics`, { ...metrics, saves: 0 });
+      await api.post(`/published/${post.id}/metrics`, {
+        ...metrics,
+        ...(missionMetric.trim() !== '' ? { missionMetric: Number(missionMetric) } : {}),
+      });
       setShowForm(false);
       onSaved();
     } catch (err) {
@@ -234,8 +241,8 @@ function PublishedRow({ post, onSaved }: { post: PublishedPost; onSaved: () => v
       </div>
       {showForm && (
         <div className="row" style={{ marginTop: 8 }}>
-          {(['views', 'likes', 'comments', 'shares', 'clicks'] as const).map((key) => (
-            <label className="field" key={key} style={{ width: 90 }}>
+          {(['views', 'likes', 'comments', 'shares', 'saves', 'clicks'] as const).map((key) => (
+            <label className="field" key={key} style={{ width: 84 }}>
               {key}
               <input
                 type="number"
@@ -245,6 +252,17 @@ function PublishedRow({ post, onSaved }: { post: PublishedPost; onSaved: () => v
               />
             </label>
           ))}
+          <label className="field" style={{ width: 110 }} title="Mission metric (e.g. completion rate) for CLARITY/COMPLETION campaigns">
+            mission
+            <input
+              type="number"
+              min={0}
+              step="0.01"
+              value={missionMetric}
+              placeholder="optional"
+              onChange={(e) => setMissionMetric(e.target.value)}
+            />
+          </label>
           <button disabled={busy} onClick={save}>
             Save
           </button>

@@ -17,6 +17,7 @@ export function approvalRoutes(ctx: AppContext) {
           videoAsset: true,
         },
         orderBy: { createdAt: 'asc' },
+        take: 200,
       }),
     );
 

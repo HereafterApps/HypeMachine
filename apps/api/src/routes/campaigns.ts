@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import parser from 'cron-parser';
 import { z } from 'zod';
 import {
   AGGRESSION_LEVELS,
@@ -76,6 +77,26 @@ function resolveOptimizationTarget(
 }
 
 export function campaignRoutes(ctx: AppContext) {
+  /** §2.4: a different persona may not run an ACTIVE campaign on the same subject. */
+  async function findSubjectConflict(
+    personaId: string,
+    subject: string,
+    excludeCampaignId?: string,
+  ) {
+    if (!subject) return undefined;
+    const overlapping = await ctx.prisma.campaign.findMany({
+      where: {
+        personaId: { not: personaId },
+        status: 'ACTIVE',
+        ...(excludeCampaignId ? { id: { not: excludeCampaignId } } : {}),
+      },
+      select: { subject: true, productName: true, persona: { select: { name: true } } },
+    });
+    return overlapping.find(
+      (c) => (c.subject ?? c.productName ?? '').trim().toLowerCase() === subject,
+    );
+  }
+
   return async function routes(app: FastifyInstance) {
     app.get('/campaigns', async (request) => {
       const { personaId } = request.query as { personaId?: string };
@@ -102,19 +123,11 @@ export function campaignRoutes(ctx: AppContext) {
       // Coordination guardrail (§2.4): a different persona may not run an
       // ACTIVE campaign on the same subject at the same time.
       const subject = (campaign.subject ?? campaign.productName ?? '').trim().toLowerCase();
-      if (subject) {
-        const overlapping = await ctx.prisma.campaign.findMany({
-          where: { personaId: { not: campaign.personaId }, status: 'ACTIVE' },
-          select: { subject: true, productName: true, persona: { select: { name: true } } },
+      const conflict = await findSubjectConflict(campaign.personaId, subject);
+      if (conflict) {
+        return reply.code(409).send({
+          error: `Coordination guardrail (§2.4): persona "${conflict.persona.name}" already runs an ACTIVE campaign on subject "${subject}". Multiple personas must not push the same message simultaneously.`,
         });
-        const conflict = overlapping.find(
-          (c) => (c.subject ?? c.productName ?? '').trim().toLowerCase() === subject,
-        );
-        if (conflict) {
-          return reply.code(409).send({
-            error: `Coordination guardrail (§2.4): persona "${conflict.persona.name}" already runs an ACTIVE campaign on subject "${subject}". Multiple personas must not push the same message simultaneously.`,
-          });
-        }
       }
 
       const created = await ctx.prisma.campaign.create({
@@ -144,7 +157,7 @@ export function campaignRoutes(ctx: AppContext) {
       });
     });
 
-    app.patch('/campaigns/:id', async (request) => {
+    app.patch('/campaigns/:id', async (request, reply) => {
       const { id } = request.params as { id: string };
       const { guardrails, ...rest } = (request.body ?? {}) as Record<string, unknown> & {
         guardrails?: z.infer<typeof GuardrailBody>;
@@ -153,6 +166,23 @@ export function campaignRoutes(ctx: AppContext) {
         .extend({ status: z.enum(['ACTIVE', 'PAUSED', 'ARCHIVED']).optional() })
         .omit({ personaId: true })
         .parse(rest);
+      // §2.4 re-check on reactivation or subject/product change — pausing a
+      // conflicting campaign and reactivating it later must not slip through.
+      if (body.status === 'ACTIVE' || body.subject !== undefined || body.productName !== undefined) {
+        const existing = await ctx.prisma.campaign.findUniqueOrThrow({ where: { id } });
+        const willBeActive = (body.status ?? existing.status) === 'ACTIVE';
+        if (willBeActive) {
+          const subject = ((body.subject ?? existing.subject) ?? (body.productName ?? existing.productName) ?? '')
+            .trim()
+            .toLowerCase();
+          const conflict = await findSubjectConflict(existing.personaId, subject, id);
+          if (conflict) {
+            return reply.code(409).send({
+              error: `Coordination guardrail (§2.4): persona "${conflict.persona.name}" already runs an ACTIVE campaign on subject "${subject}".`,
+            });
+          }
+        }
+      }
       if (body.campaignType || body.optimizationTarget) {
         const existing = await ctx.prisma.campaign.findUniqueOrThrow({ where: { id } });
         const effectiveType = body.campaignType ?? existing.campaignType;
@@ -241,6 +271,16 @@ export function campaignRoutes(ctx: AppContext) {
           { message: 'CRON schedules need cronExpression; INTERVAL schedules need intervalMinutes.' },
         )
         .parse(request.body);
+      // Validate now so a bad cron/timezone can never reach the scheduler.
+      if (body.cronExpression) {
+        try {
+          parser.parseExpression(body.cronExpression, { tz: body.timezone });
+        } catch (error) {
+          return reply.code(400).send({
+            error: `Invalid cronExpression/timezone: ${error instanceof Error ? error.message : error}`,
+          });
+        }
+      }
       const schedule = await ctx.prisma.contentSchedule.create({
         data: { campaignId: id, ...body, nextRunAt: new Date() },
       });
