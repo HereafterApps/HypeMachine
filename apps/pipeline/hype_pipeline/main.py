@@ -7,8 +7,33 @@ calls this service over HTTP with a shared bearer token.
 from __future__ import annotations
 
 import os
+import secrets
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+
+
+def _load_dotenv() -> None:
+    """Minimal .env loader (no dependency): repo root first, then local.
+
+    Existing environment variables always win; values are only defaulted.
+    Lets `pnpm dev:pipeline` pick up LLM_PROVIDER / ANTHROPIC_API_KEY /
+    PIPELINE_TOKEN from the same root .env the TS API uses.
+    """
+    here = Path(__file__).resolve()
+    # parents[3] = repo root, parents[1] = apps/pipeline
+    for candidate in (here.parents[3] / ".env", here.parents[1] / ".env"):
+        if not candidate.is_file():
+            continue
+        for line in candidate.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+_load_dotenv()
 
 from .guardrails import run_guardrails
 from .prompts import (
@@ -39,7 +64,8 @@ provider = create_provider()
 
 def require_token(request: Request) -> None:
     expected = os.environ.get("PIPELINE_TOKEN", "dev-pipeline-token")
-    if request.headers.get("authorization") != f"Bearer {expected}":
+    provided = request.headers.get("authorization", "")
+    if not secrets.compare_digest(provided, f"Bearer {expected}"):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 

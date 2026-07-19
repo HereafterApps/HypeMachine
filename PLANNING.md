@@ -1,6 +1,7 @@
 # Hype Machine — Planning
 
-> **Superseded:** the full implementation plan now lives in
+> **Superseded:** the authoritative spec is now
+> [`docs/build-spec.md`](docs/build-spec.md); the detailed reference plan is
 > [`docs/product-plan.md`](docs/product-plan.md). This file is kept as the
 > original scoping/questions record.
 

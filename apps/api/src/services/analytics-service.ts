@@ -80,6 +80,25 @@ export class AnalyticsService {
           return { insight: null, reason: 'Need at least 2 posts with metrics to compare.' };
         }
 
+        // The 6-hourly job would otherwise append near-identical insights
+        // (and persona memories) forever — only learn when there is new data.
+        const latestInsight = await this.ctx.prisma.learningInsight.findFirst({
+          where: { campaignId },
+          orderBy: { createdAt: 'desc' },
+        });
+        if (latestInsight) {
+          const newestSnapshot = withMetrics.reduce(
+            (max, p) => Math.max(max, p.snapshots[0]!.capturedAt.getTime()),
+            0,
+          );
+          if (newestSnapshot <= latestInsight.createdAt.getTime()) {
+            return {
+              insight: null,
+              reason: 'No new metrics since the last insight — nothing new to learn.',
+            };
+          }
+        }
+
         const performanceLines = withMetrics.map((p) => {
           const s = p.snapshots[0]!;
           const c = p.generatedContent;

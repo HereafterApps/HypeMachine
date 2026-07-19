@@ -59,10 +59,12 @@ curl -s -X POST -H "Authorization: Bearer change-me" localhost:3001/approvals/<c
 ## Tests
 
 ```bash
-pnpm test               # unit tests (all packages)
-pnpm dev:infra          # once, for the integration suite
+pnpm test                          # TS unit tests (all packages)
+(cd apps/pipeline && uv run pytest) # pipeline service tests
+pnpm dev:infra                     # once, for the integration suite
 pnpm db:migrate && pnpm db:seed
-pnpm test:integration   # full §26 demo scenario against live PG + Redis
+pnpm test:integration              # full demo-scenario e2e against live PG + Redis
+                                   # (boots the Python pipeline itself)
 pnpm typecheck
 ```
 
@@ -75,8 +77,9 @@ See `.env.example` for the full list. The important ones:
 | `DATABASE_URL` | Postgres connection string |
 | `REDIS_URL` | Redis for BullMQ queues |
 | `API_TOKEN` | Single-user bearer token (v1 auth) |
-| `LLM_PROVIDER` | `stub` (deterministic, keyless) or `anthropic` |
-| `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | Real generation (default model `claude-opus-4-8`) |
+| `PIPELINE_URL` / `PIPELINE_TOKEN` | Where the API reaches the Python pipeline + shared bearer token |
+| `LLM_PROVIDER` | Read by the pipeline: `stub` (deterministic, keyless) or `anthropic` |
+| `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | Read by the pipeline for real generation (default model `claude-opus-4-8`) |
 | `STORAGE_DRIVER` | `local` (default, `./storage`) or `s3` (`pnpm add @aws-sdk/client-s3 --filter @hype/storage`) |
 | `NOTIFY_CHANNELS` | Comma-separated: `console`, `discord`, `email` |
 | `DISCORD_WEBHOOK_URL` | Approval notifications via Discord |
@@ -86,10 +89,11 @@ See `.env.example` for the full list. The important ones:
 ## Switching to real generation
 
 ```bash
-# .env
+# root .env (the pipeline reads it on startup; restart pnpm dev:pipeline)
 LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-…
 ```
 
-Everything else is identical — the provider sits behind the `LlmProvider`
-interface and produces the same validated, guardrail-checked output shapes.
+Everything else is identical — the provider sits behind the pipeline's
+`LlmProvider` protocol and produces the same validated, guardrail-checked
+output shapes.
